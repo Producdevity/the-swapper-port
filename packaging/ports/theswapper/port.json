@@ -1,0 +1,42 @@
+{
+  "version": 4,
+  "name": "theswapper.zip",
+  "items": [
+    "The Swapper.sh",
+    "theswapper"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "The Swapper",
+    "porter": [
+      "Producdevity"
+    ],
+    "desc": "A puzzle-platformer set aboard an abandoned space station, built around creating and swapping between clones.",
+    "desc_md": null,
+    "inst": "Requires the Windows Steam version of The Swapper. Copy all game files into theswapper/gamedata, then launch the port.",
+    "inst_md": "### Steam Instructions\nCopy the Windows Steam game files into `ports/theswapper/gamedata`, then launch the port.\n\nThe folder should contain `TheSwapper.exe`, `mainSettings.ini`, and the `data` directory.",
+    "genres": [
+      "puzzle",
+      "platformer"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [
+      "mono-6.12.0.122-aarch64.squashfs"
+    ],
+    "store": [
+      {
+        "name": "Steam",
+        "gameurl": "https://store.steampowered.com/app/231160/The_Swapper/",
+        "developerurl": ""
+      }
+    ],
+    "availability": "paid",
+    "reqs": [],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": ""
+  }
+}

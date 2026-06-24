@@ -1,0 +1,124 @@
+The Swapper PortMaster package includes native compatibility shims and
+third-party support libraries. The retail game files are not included.
+
+Compatibility shims built from this repository:
+- libs.aarch64/libfmodex.so
+- libs.aarch64/libsteam_api.so
+- libs.aarch64/libsdkencryptedappticket.so
+- libs.aarch64/libwindows_stub.so
+- libs.aarch64/kernel32
+- libs.aarch64/dwmapi
+- libs.aarch64/libkernel32.so
+- libs.aarch64/libdwmapi.so
+
+License: LICENSE.Port.txt
+
+Packaged third-party support libraries:
+- gl4es.aarch64/libGL.so.1
+- gl4es.aarch64/libEGL.so.1
+  License: LICENSE.GL4ES.txt
+
+- libs.aarch64/libSDL2_image-2.0.so.0
+- libs.aarch64/libSDL2_image.so
+- libs.aarch64/libSDL2_image.dll
+  License: LICENSE.SDL2_image.txt
+
+- libs.aarch64/libSDL2_mixer-2.0.so.0
+- libs.aarch64/libSDL2_mixer.so
+- libs.aarch64/libSDL2_mixer.dll
+  License: LICENSE.SDL2_mixer.txt
+
+- libs.aarch64/libSDL2_ttf-2.0.so.0
+- libs.aarch64/libSDL2_ttf.so
+- libs.aarch64/libSDL2_ttf.dll
+  License: LICENSE.SDL2_ttf.txt
+
+- libs.aarch64/libFLAC.so.8
+  License: LICENSE.FLAC.txt
+
+- libs.aarch64/libogg.so.0
+  License: LICENSE.libogg.txt
+
+- libs.aarch64/libopus.so.0
+  License: LICENSE.Opus.txt
+
+- libs.aarch64/libopusfile.so.0
+  License: LICENSE.Opusfile.txt
+
+- libs.aarch64/libfluidsynth.so.1
+  License: LICENSE.FluidSynth.txt
+
+- libs.aarch64/libfreetype.so.6
+  License: LICENSE.FreeType.txt
+
+- libs.aarch64/libjack.so.0
+  License: LICENSE.JACK2.txt
+
+- libs.aarch64/libjbig.so.0
+  License: LICENSE.JBIG-KIT.txt
+
+- libs.aarch64/libjpeg.so.8
+  License: LICENSE.libjpeg-turbo.txt
+
+- libs.aarch64/liblz4.so.1
+  License: LICENSE.LZ4.txt
+
+- libs.aarch64/liblzma.so.5
+  License: LICENSE.XZ.txt
+
+- libs.aarch64/libmodplug.so.1
+  License: LICENSE.libmodplug.txt
+
+- libs.aarch64/libmpg123.so.0
+  License: LICENSE.mpg123.txt
+
+- libs.aarch64/libpng16.so.16
+  License: LICENSE.libpng.txt
+
+- libs.aarch64/libreadline.so.8
+  License: LICENSE.Readline.txt
+
+- libs.aarch64/libsndfile.so.1
+  License: LICENSE.libsndfile.txt
+
+- libs.aarch64/libtiff.so.5
+  License: LICENSE.libtiff.txt
+
+- libs.aarch64/libtinfo.so.6
+  License: LICENSE.ncurses.txt
+
+- libs.aarch64/libwebp.so.6
+  License: LICENSE.WebP.txt
+
+- libs.aarch64/libz.so.1
+  License: LICENSE.zlib.txt
+
+- libs.aarch64/libzstd.so.1
+  License: LICENSE.Zstandard.txt
+
+Source references:
+- GL4ES: https://github.com/ptitSeb/gl4es
+- SDL2_image: https://github.com/libsdl-org/SDL_image
+- SDL2_mixer: https://github.com/libsdl-org/SDL_mixer
+- SDL2_ttf: https://github.com/libsdl-org/SDL_ttf
+- FLAC: https://github.com/xiph/flac
+- libogg: https://github.com/xiph/ogg
+- Opus: https://github.com/xiph/opus
+- Opusfile: https://github.com/xiph/opusfile
+- FluidSynth: https://github.com/FluidSynth/fluidsynth
+- FreeType: https://gitlab.freedesktop.org/freetype/freetype
+- JACK2: https://github.com/jackaudio/jack2
+- JBIG-KIT: https://www.cl.cam.ac.uk/~mgk25/jbigkit/
+- libjpeg-turbo: https://github.com/libjpeg-turbo/libjpeg-turbo
+- LZ4: https://github.com/lz4/lz4
+- XZ Utils: https://github.com/tukaani-project/xz
+- libmodplug: https://github.com/Konstanty/libmodplug
+- mpg123: https://www.mpg123.de/
+- libpng: http://www.libpng.org/pub/png/libpng.html
+- GNU Readline: https://tiswww.case.edu/php/chet/readline/rltop.html
+- libsndfile: https://github.com/libsndfile/libsndfile
+- libtiff: https://gitlab.com/libtiff/libtiff
+- ncurses: https://invisible-island.net/ncurses/
+- WebP: https://chromium.googlesource.com/webm/libwebp
+- zlib: https://zlib.net/
+- Zstandard: https://github.com/facebook/zstd
