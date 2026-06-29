@@ -1,10 +1,14 @@
 #include <dlfcn.h>
+#include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 typedef unsigned long z_ulong;
@@ -47,6 +51,14 @@ static void write_be32(unsigned char *p, uint32_t value)
     p[1] = (unsigned char)(value >> 16);
     p[2] = (unsigned char)(value >> 8);
     p[3] = (unsigned char)value;
+}
+
+static void write_le32(unsigned char *p, uint32_t value)
+{
+    p[0] = (unsigned char)value;
+    p[1] = (unsigned char)(value >> 8);
+    p[2] = (unsigned char)(value >> 16);
+    p[3] = (unsigned char)(value >> 24);
 }
 
 static int buffer_reserve(struct buffer *buffer, size_t extra)
@@ -344,30 +356,9 @@ static unsigned char encode_component(double value)
     return (unsigned char)out;
 }
 
-static struct image downscale_normal_map(const struct image *input, uint32_t max_dimension)
+static struct image resample_normal_map(const struct image *input, uint32_t out_width, uint32_t out_height)
 {
     struct image output = {0};
-    uint32_t out_width;
-    uint32_t out_height;
-
-    if (input->width <= max_dimension && input->height <= max_dimension)
-        return output;
-
-    if (input->width >= input->height)
-    {
-        out_width = max_dimension;
-        out_height = (uint32_t)(((uint64_t)input->height * max_dimension + input->width / 2) / input->width);
-    }
-    else
-    {
-        out_height = max_dimension;
-        out_width = (uint32_t)(((uint64_t)input->width * max_dimension + input->height / 2) / input->height);
-    }
-
-    if (out_width == 0)
-        out_width = 1;
-    if (out_height == 0)
-        out_height = 1;
 
     output.rgba = malloc((size_t)out_width * out_height * 4);
     if (output.rgba == NULL)
@@ -442,6 +433,33 @@ static struct image downscale_normal_map(const struct image *input, uint32_t max
     }
 
     return output;
+}
+
+static struct image downscale_normal_map(const struct image *input, uint32_t max_dimension)
+{
+    uint32_t out_width;
+    uint32_t out_height;
+
+    if (input->width <= max_dimension && input->height <= max_dimension)
+        return (struct image){0};
+
+    if (input->width >= input->height)
+    {
+        out_width = max_dimension;
+        out_height = (uint32_t)(((uint64_t)input->height * max_dimension + input->width / 2) / input->width);
+    }
+    else
+    {
+        out_height = max_dimension;
+        out_width = (uint32_t)(((uint64_t)input->width * max_dimension + input->height / 2) / input->height);
+    }
+
+    if (out_width == 0)
+        out_width = 1;
+    if (out_height == 0)
+        out_height = 1;
+
+    return resample_normal_map(input, out_width, out_height);
 }
 
 static int write_chunk(struct buffer *png, const struct z_api *z, const char type[4], const unsigned char *data, uint32_t size)
@@ -551,6 +569,466 @@ done:
     return result;
 }
 
+static int path_join(char *out, size_t out_size, const char *left, const char *right)
+{
+    int written = snprintf(out, out_size, "%s/%s", left, right);
+    return written > 0 && (size_t)written < out_size;
+}
+
+static int has_suffix(const char *value, const char *suffix)
+{
+    size_t value_len = strlen(value);
+    size_t suffix_len = strlen(suffix);
+
+    return value_len >= suffix_len && strcmp(value + value_len - suffix_len, suffix) == 0;
+}
+
+static int is_normal_png(const char *name)
+{
+    return has_suffix(name, ".png") && strstr(name, "#normal") != NULL;
+}
+
+static int mips_path_for_png(const char *png_path, char *mips_path, size_t mips_path_size)
+{
+    size_t len = strlen(png_path);
+
+    if (len < 4 || !has_suffix(png_path, ".png") || len + 2 > mips_path_size)
+        return -1;
+
+    memcpy(mips_path, png_path, len - 4);
+    memcpy(mips_path + len - 4, ".mips", 6);
+    return 0;
+}
+
+static int clamp_int(int value, int min_value, int max_value)
+{
+    if (value < min_value)
+        return min_value;
+    if (value > max_value)
+        return max_value;
+    return value;
+}
+
+static uint16_t rgb_to_565(int r, int g, int b)
+{
+    uint16_t out = 0;
+
+    out |= (uint16_t)((clamp_int(r, 0, 255) * 31 + 127) / 255) << 11;
+    out |= (uint16_t)((clamp_int(g, 0, 255) * 63 + 127) / 255) << 5;
+    out |= (uint16_t)((clamp_int(b, 0, 255) * 31 + 127) / 255);
+    return out;
+}
+
+static void rgb_from_565(uint16_t value, int *r, int *g, int *b)
+{
+    int r5 = (value >> 11) & 31;
+    int g6 = (value >> 5) & 63;
+    int b5 = value & 31;
+
+    *r = (r5 << 3) | (r5 >> 2);
+    *g = (g6 << 2) | (g6 >> 4);
+    *b = (b5 << 3) | (b5 >> 2);
+}
+
+static unsigned char nearest_alpha_index(unsigned char value, const unsigned char palette[8])
+{
+    int best_index = 0;
+    int best_distance = 256;
+
+    for (int i = 0; i < 8; i++)
+    {
+        int distance = abs((int)value - (int)palette[i]);
+        if (distance < best_distance)
+        {
+            best_distance = distance;
+            best_index = i;
+        }
+    }
+
+    return (unsigned char)best_index;
+}
+
+static void encode_bc3_alpha(const unsigned char alpha[16], unsigned char out[8])
+{
+    unsigned char min_alpha = 255;
+    unsigned char max_alpha = 0;
+    unsigned char palette[8];
+    uint64_t bits = 0;
+
+    for (int i = 0; i < 16; i++)
+    {
+        if (alpha[i] < min_alpha)
+            min_alpha = alpha[i];
+        if (alpha[i] > max_alpha)
+            max_alpha = alpha[i];
+    }
+
+    out[0] = max_alpha;
+    out[1] = min_alpha;
+
+    palette[0] = max_alpha;
+    palette[1] = min_alpha;
+    if (max_alpha > min_alpha)
+    {
+        palette[2] = (unsigned char)((6 * max_alpha + 1 * min_alpha + 3) / 7);
+        palette[3] = (unsigned char)((5 * max_alpha + 2 * min_alpha + 3) / 7);
+        palette[4] = (unsigned char)((4 * max_alpha + 3 * min_alpha + 3) / 7);
+        palette[5] = (unsigned char)((3 * max_alpha + 4 * min_alpha + 3) / 7);
+        palette[6] = (unsigned char)((2 * max_alpha + 5 * min_alpha + 3) / 7);
+        palette[7] = (unsigned char)((1 * max_alpha + 6 * min_alpha + 3) / 7);
+    }
+    else
+    {
+        palette[2] = (unsigned char)((4 * max_alpha + 1 * min_alpha + 2) / 5);
+        palette[3] = (unsigned char)((3 * max_alpha + 2 * min_alpha + 2) / 5);
+        palette[4] = (unsigned char)((2 * max_alpha + 3 * min_alpha + 2) / 5);
+        palette[5] = (unsigned char)((1 * max_alpha + 4 * min_alpha + 2) / 5);
+        palette[6] = 0;
+        palette[7] = 255;
+    }
+
+    for (int i = 0; i < 16; i++)
+        bits |= (uint64_t)nearest_alpha_index(alpha[i], palette) << (3 * i);
+
+    for (int i = 0; i < 6; i++)
+        out[2 + i] = (unsigned char)(bits >> (8 * i));
+}
+
+static int color_distance_sq(const int a[3], const int b[3])
+{
+    int dr = a[0] - b[0];
+    int dg = a[1] - b[1];
+    int db = a[2] - b[2];
+
+    return dr * dr + dg * dg + db * db;
+}
+
+static void encode_bc3_color(const unsigned char rgba[64], unsigned char out[8])
+{
+    int min_rgb[3] = {255, 255, 255};
+    int max_rgb[3] = {0, 0, 0};
+    int palette[4][3];
+    uint16_t color0;
+    uint16_t color1;
+    uint32_t bits = 0;
+
+    for (int i = 0; i < 16; i++)
+    {
+        const unsigned char *p = rgba + i * 4;
+
+        for (int c = 0; c < 3; c++)
+        {
+            if (p[c] < min_rgb[c])
+                min_rgb[c] = p[c];
+            if (p[c] > max_rgb[c])
+                max_rgb[c] = p[c];
+        }
+    }
+
+    color0 = rgb_to_565(max_rgb[0], max_rgb[1], max_rgb[2]);
+    color1 = rgb_to_565(min_rgb[0], min_rgb[1], min_rgb[2]);
+    if (color0 <= color1)
+    {
+        uint16_t tmp = color0;
+        color0 = color1;
+        color1 = tmp;
+    }
+
+    rgb_from_565(color0, &palette[0][0], &palette[0][1], &palette[0][2]);
+    rgb_from_565(color1, &palette[1][0], &palette[1][1], &palette[1][2]);
+    for (int c = 0; c < 3; c++)
+    {
+        palette[2][c] = (2 * palette[0][c] + palette[1][c] + 1) / 3;
+        palette[3][c] = (palette[0][c] + 2 * palette[1][c] + 1) / 3;
+    }
+
+    for (int i = 0; i < 16; i++)
+    {
+        int pixel[3] = {rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]};
+        int best_index = 0;
+        int best_distance = color_distance_sq(pixel, palette[0]);
+
+        for (int j = 1; j < 4; j++)
+        {
+            int distance = color_distance_sq(pixel, palette[j]);
+            if (distance < best_distance)
+            {
+                best_distance = distance;
+                best_index = j;
+            }
+        }
+
+        bits |= (uint32_t)best_index << (2 * i);
+    }
+
+    out[0] = (unsigned char)color0;
+    out[1] = (unsigned char)(color0 >> 8);
+    out[2] = (unsigned char)color1;
+    out[3] = (unsigned char)(color1 >> 8);
+    out[4] = (unsigned char)bits;
+    out[5] = (unsigned char)(bits >> 8);
+    out[6] = (unsigned char)(bits >> 16);
+    out[7] = (unsigned char)(bits >> 24);
+}
+
+static int write_bc3_level(FILE *file, const struct image *image)
+{
+    uint32_t block_width = (image->width + 3) / 4;
+    uint32_t block_height = (image->height + 3) / 4;
+
+    for (uint32_t by = 0; by < block_height; by++)
+    {
+        for (uint32_t bx = 0; bx < block_width; bx++)
+        {
+            unsigned char alpha[16];
+            unsigned char rgba[64];
+            unsigned char block[16];
+
+            for (uint32_t py = 0; py < 4; py++)
+            {
+                for (uint32_t px = 0; px < 4; px++)
+                {
+                    uint32_t src_x = bx * 4 + px;
+                    uint32_t src_y = by * 4 + py;
+                    const unsigned char *src;
+                    unsigned char *dst = rgba + (py * 4 + px) * 4;
+
+                    if (src_x >= image->width)
+                        src_x = image->width - 1;
+                    if (src_y >= image->height)
+                        src_y = image->height - 1;
+
+                    src = image->rgba + ((size_t)src_y * image->width + src_x) * 4;
+                    memcpy(dst, src, 4);
+                    alpha[py * 4 + px] = src[3];
+                }
+            }
+
+            encode_bc3_alpha(alpha, block);
+            encode_bc3_color(rgba, block + 8);
+            if (fwrite(block, 1, sizeof(block), file) != sizeof(block))
+                return -1;
+        }
+    }
+
+    return 0;
+}
+
+static uint32_t bc3_level_size(uint32_t width, uint32_t height)
+{
+    return ((width + 3) / 4) * ((height + 3) / 4) * 16;
+}
+
+static uint8_t mip_count_for_image(uint32_t width, uint32_t height)
+{
+    uint8_t count = 1;
+
+    while (width > 1 || height > 1)
+    {
+        width = width > 1 ? width / 2 : 1;
+        height = height > 1 ? height / 2 : 1;
+        count++;
+    }
+
+    return count;
+}
+
+static int write_mips_file(const char *path, const struct image *base_image)
+{
+    char temp_path[PATH_MAX];
+    FILE *file = NULL;
+    struct image current = {0};
+    int owns_current = 0;
+    uint8_t mip_count;
+    unsigned char header[17] = {0};
+    int result = -1;
+
+    if (snprintf(temp_path, sizeof(temp_path), "%s.tmp.%ld", path, (long)getpid()) >= (int)sizeof(temp_path))
+        return -1;
+
+    file = fopen(temp_path, "wb");
+    if (file == NULL)
+        return -1;
+
+    mip_count = mip_count_for_image(base_image->width, base_image->height);
+    header[0] = 3;
+    header[1] = mip_count;
+    write_le32(header + 4, base_image->width << 8);
+    write_le32(header + 8, base_image->height << 8);
+    write_le32(header + 12, base_image->width * base_image->height * 256u);
+
+    if (fwrite(header, 1, sizeof(header), file) != sizeof(header))
+        goto done;
+
+    current = *base_image;
+    for (uint8_t level = 0; level < mip_count; level++)
+    {
+        if (level != 0)
+        {
+            unsigned char size_bytes[4];
+            write_le32(size_bytes, bc3_level_size(current.width, current.height));
+            if (fwrite(size_bytes, 1, sizeof(size_bytes), file) != sizeof(size_bytes))
+                goto done;
+        }
+
+        if (write_bc3_level(file, &current) != 0)
+            goto done;
+
+        if (level + 1 < mip_count)
+        {
+            struct image next = resample_normal_map(&current, current.width > 1 ? current.width / 2 : 1, current.height > 1 ? current.height / 2 : 1);
+            if (next.rgba == NULL)
+                goto done;
+            if (owns_current)
+                free(current.rgba);
+            current = next;
+            owns_current = 1;
+        }
+    }
+
+    if (fclose(file) != 0)
+    {
+        file = NULL;
+        goto done;
+    }
+    file = NULL;
+
+    if (rename(temp_path, path) != 0)
+        goto done;
+
+    result = 0;
+
+done:
+    if (file != NULL)
+        fclose(file);
+    if (result != 0)
+        unlink(temp_path);
+    if (owns_current)
+        free(current.rgba);
+    return result;
+}
+
+static int process_normal_png(const char *path, const struct z_api *z, uint32_t max_dimension, int *patched_count)
+{
+    char mips_path[PATH_MAX];
+    struct image input = {0};
+    struct image output = {0};
+    const struct image *patched_image;
+    int result = -1;
+
+    if (decode_png_rgba8(path, z, &input) != 0)
+    {
+        fprintf(stderr, "Failed to decode RGBA PNG: %s\n", path);
+        return -1;
+    }
+
+    output = downscale_normal_map(&input, max_dimension);
+    if (output.rgba == NULL)
+    {
+        result = 0;
+        goto done;
+    }
+
+    if (mips_path_for_png(path, mips_path, sizeof(mips_path)) != 0)
+    {
+        fprintf(stderr, "Failed to build mip path for %s\n", path);
+        goto done;
+    }
+
+    if (encode_png_rgba8(path, z, &output) != 0)
+    {
+        fprintf(stderr, "Failed to write downscaled PNG: %s\n", path);
+        goto done;
+    }
+
+    patched_image = &output;
+    if (write_mips_file(mips_path, patched_image) != 0)
+    {
+        fprintf(stderr, "Failed to write downscaled mip chain: %s\n", mips_path);
+        goto done;
+    }
+
+    printf("Downscaled %s from %ux%u to %ux%u\n", path, input.width, input.height, output.width, output.height);
+    (*patched_count)++;
+    result = 0;
+
+done:
+    free(input.rgba);
+    free(output.rgba);
+    return result;
+}
+
+static int walk_textures(const char *dir_path, const struct z_api *z, uint32_t max_dimension, int *patched_count)
+{
+    DIR *dir = opendir(dir_path);
+    struct dirent *entry;
+
+    if (dir == NULL)
+        return -1;
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        char child[PATH_MAX];
+        struct stat st;
+
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        if (!path_join(child, sizeof(child), dir_path, entry->d_name))
+        {
+            closedir(dir);
+            return -1;
+        }
+
+        if (lstat(child, &st) != 0)
+        {
+            closedir(dir);
+            return -1;
+        }
+
+        if (S_ISDIR(st.st_mode))
+        {
+            if (walk_textures(child, z, max_dimension, patched_count) != 0)
+            {
+                closedir(dir);
+                return -1;
+            }
+        }
+        else if (S_ISREG(st.st_mode) && is_normal_png(entry->d_name))
+        {
+            if (process_normal_png(child, z, max_dimension, patched_count) != 0)
+            {
+                closedir(dir);
+                return -1;
+            }
+        }
+    }
+
+    closedir(dir);
+    return 0;
+}
+
+static int patch_normal_map_tree(const char *gamedata_dir, const struct z_api *z, uint32_t max_dimension)
+{
+    char textures_dir[PATH_MAX];
+    int patched_count = 0;
+
+    if (!path_join(textures_dir, sizeof(textures_dir), gamedata_dir, "data/textures"))
+    {
+        fprintf(stderr, "Path is too long.\n");
+        return -1;
+    }
+
+    if (walk_textures(textures_dir, z, max_dimension, &patched_count) != 0)
+    {
+        fprintf(stderr, "Failed to downscale normal maps under %s\n", textures_dir);
+        return -1;
+    }
+
+    printf("Downscaled %d normal maps to max %u pixels.\n", patched_count, max_dimension);
+    return 0;
+}
+
 static int parse_max_dimension(const char *value, uint32_t *out)
 {
     char *end = NULL;
@@ -573,15 +1051,16 @@ int main(int argc, char **argv)
     uint32_t max_dimension;
     int result = 1;
 
-    if (argc != 4)
+    if (argc != 3 && argc != 4)
     {
-        fprintf(stderr, "usage: %s <input.png> <output.png> <max-dimension>\n", argv[0]);
+        fprintf(stderr, "usage: %s <gamedata-dir> <max-dimension>\n", argv[0]);
+        fprintf(stderr, "       %s <input.png> <output.png> <max-dimension>\n", argv[0]);
         return 2;
     }
 
-    if (parse_max_dimension(argv[3], &max_dimension) != 0)
+    if (parse_max_dimension(argv[argc - 1], &max_dimension) != 0)
     {
-        fprintf(stderr, "Invalid max dimension: %s\n", argv[3]);
+        fprintf(stderr, "Invalid max dimension: %s\n", argv[argc - 1]);
         return 2;
     }
 
@@ -589,6 +1068,12 @@ int main(int argc, char **argv)
     {
         fprintf(stderr, "Failed to load zlib\n");
         return 1;
+    }
+
+    if (argc == 3)
+    {
+        result = patch_normal_map_tree(argv[1], &z, max_dimension) == 0 ? 0 : 1;
+        goto done;
     }
 
     if (decode_png_rgba8(argv[1], &z, &input) != 0)
@@ -608,6 +1093,17 @@ int main(int argc, char **argv)
     {
         fprintf(stderr, "Failed to write downscaled PNG: %s\n", argv[2]);
         goto done;
+    }
+
+    if (strcmp(argv[1], argv[2]) == 0)
+    {
+        char mips_path[PATH_MAX];
+        if (mips_path_for_png(argv[2], mips_path, sizeof(mips_path)) != 0 ||
+            write_mips_file(mips_path, &output) != 0)
+        {
+            fprintf(stderr, "Failed to write downscaled mip chain for %s\n", argv[2]);
+            goto done;
+        }
     }
 
     result = 0;
