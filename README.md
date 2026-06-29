@@ -79,6 +79,5 @@ the next launch.
 ## First Launch
 
 The launcher uses PortMaster's patcher UI for first-run setup. The setup step
-validates the game files, installs the Mono DLL map, reduces normal-map texture
-cost in the copied game data, adjusts handheld text readability, seeds a
-low-spec profile if no profile exists yet, and marks setup complete.
+validates the game files, installs the Mono DLL map, seeds a low-spec profile if
+no profile exists yet, and marks setup complete.
