@@ -84,6 +84,7 @@ export BROWSER="$GAMEDIR/tools/xdg-open"
 export MONO_PATH="$GAMEDATA"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$GAMEDIR/gl4es.${DEVICE_ARCH}:${LD_LIBRARY_PATH:-}"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+export MONO_MANAGED_WATCHER=1
 
 if [ -f "${controlfolder}/libgl_${CFW_NAME}.txt" ]; then
   # shellcheck source=/dev/null
