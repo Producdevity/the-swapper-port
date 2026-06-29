@@ -247,7 +247,6 @@ FMOD_RESULT FMOD_System_Init(void *system, int32_t max_channels, int32_t flags, 
     (void)flags;
     (void)extra_driver_data;
     trace_call("FMOD_System_Init");
-    init_audio();
     return FMOD_OK;
 }
 
@@ -276,6 +275,46 @@ FMOD_RESULT FMOD_System_PlaySound(void *system, int32_t channel_id, void *sound_
     FmodChannel *created = play_sound(as_sound(sound_handle), paused);
     if (channel != NULL)
         *channel = created != NULL ? created : new_handle();
+    return FMOD_OK;
+}
+
+FMOD_RESULT FMOD_System_CreateChannelGroup(void *system, const char *name, void **group)
+{
+    (void)system;
+    (void)name;
+    trace_call("FMOD_System_CreateChannelGroup");
+    if (group != NULL)
+        *group = new_handle();
+    return FMOD_OK;
+}
+
+FMOD_RESULT FMOD_System_CreateDSP(void *system, void *description, void **dsp)
+{
+    (void)system;
+    (void)description;
+    trace_call("FMOD_System_CreateDSP");
+    if (dsp != NULL)
+        *dsp = NULL;
+    return FMOD_OK;
+}
+
+FMOD_RESULT FMOD_System_CreateDSPByPlugin(void *system, uint32_t plugin_handle, void **dsp)
+{
+    (void)system;
+    (void)plugin_handle;
+    trace_call("FMOD_System_CreateDSPByPlugin");
+    if (dsp != NULL)
+        *dsp = NULL;
+    return FMOD_OK;
+}
+
+FMOD_RESULT FMOD_System_CreateDSPByType(void *system, int32_t dsp_type, void **dsp)
+{
+    (void)system;
+    (void)dsp_type;
+    trace_call("FMOD_System_CreateDSPByType");
+    if (dsp != NULL)
+        *dsp = NULL;
     return FMOD_OK;
 }
 
@@ -544,6 +583,41 @@ FMOD_RESULT FMOD_System_GetSoundRAM(
         *max_alloced = 0;
     if (total != NULL)
         *total = 0;
+    return FMOD_OK;
+}
+
+FMOD_RESULT FMOD_System_GetSoftwareFormat(
+    void *system,
+    int32_t *sample_rate,
+    int32_t *format,
+    int32_t *output_channels,
+    int32_t *max_input_channels,
+    int32_t *resample_method,
+    int32_t *bits)
+{
+    (void)system;
+    trace_call("FMOD_System_GetSoftwareFormat");
+    if (sample_rate != NULL)
+        *sample_rate = 44100;
+    if (format != NULL)
+        *format = 2;
+    if (output_channels != NULL)
+        *output_channels = 2;
+    if (max_input_channels != NULL)
+        *max_input_channels = 2;
+    if (resample_method != NULL)
+        *resample_method = 0;
+    if (bits != NULL)
+        *bits = 16;
+    return FMOD_OK;
+}
+
+FMOD_RESULT FMOD_System_GetSpeakerMode(void *system, int32_t *speaker_mode)
+{
+    (void)system;
+    trace_call("FMOD_System_GetSpeakerMode");
+    if (speaker_mode != NULL)
+        *speaker_mode = 2;
     return FMOD_OK;
 }
 
@@ -835,11 +909,7 @@ FMOD_STUB(FMOD_Sound_Unlock)
 FMOD_STUB(FMOD_System_AddDSP)
 FMOD_STUB(FMOD_System_AttachFileSystem)
 FMOD_STUB(FMOD_System_Close)
-FMOD_STUB(FMOD_System_CreateChannelGroup)
 FMOD_STUB(FMOD_System_CreateCodec)
-FMOD_STUB(FMOD_System_CreateDSP)
-FMOD_STUB(FMOD_System_CreateDSPByPlugin)
-FMOD_STUB(FMOD_System_CreateDSPByType)
 FMOD_STUB(FMOD_System_CreateGeometry)
 FMOD_STUB(FMOD_System_CreateReverb)
 FMOD_STUB(FMOD_System_CreateSoundGroup)
@@ -869,8 +939,6 @@ FMOD_STUB(FMOD_System_GetPluginInfo)
 FMOD_STUB(FMOD_System_GetReverbAmbientProperties)
 FMOD_STUB(FMOD_System_GetReverbProperties)
 FMOD_STUB(FMOD_System_GetSoftwareChannels)
-FMOD_STUB(FMOD_System_GetSoftwareFormat)
-FMOD_STUB(FMOD_System_GetSpeakerMode)
 FMOD_STUB(FMOD_System_GetSpectrum)
 FMOD_STUB(FMOD_System_GetStreamBufferSize)
 FMOD_STUB(FMOD_System_GetUserData)
