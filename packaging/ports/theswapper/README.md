@@ -4,7 +4,7 @@ Thanks to Facepalm Games for creating The Swapper.
 
 ## Installation
 
-Copy the Windows Steam game files into `ports/theswapper/gamedata`.
+Install the port with PortMaster, then copy the Windows Steam game files into `ports/theswapper/gamedata`.
 
 The folder should contain:
 
@@ -18,4 +18,15 @@ On first launch, the PortMaster setup screen validates the files and prepares th
 
 ## Controls
 
-The game has controller support. If a device does not map correctly, update PortMaster first so the current SDL controller database is available.
+Select Xbox/Deck Controller when prompted.
+
+| Button             | Action                 |
+| ------------------ | ---------------------- |
+| Left Stick / D-Pad | Move / menu navigation |
+| Right Stick        | Move cursor            |
+| A                  | Jump / interact        |
+| B                  | Map / PDA              |
+| X                  | interact               |
+| L1 / L2            | Clone                  |
+| R1 / R2            | Swap                   |
+| Start              | Pause / open menu      |
