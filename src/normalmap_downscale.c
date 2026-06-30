@@ -382,7 +382,6 @@ static struct image resample_normal_map(const struct image *input, uint32_t out_
             double nx = 0.0;
             double ny = 0.0;
             double nz = 0.0;
-            double alpha = 0.0;
             uint32_t count = 0;
 
             if (x1 <= x0)
@@ -394,10 +393,10 @@ static struct image resample_normal_map(const struct image *input, uint32_t out_
                 {
                     const unsigned char *p = input->rgba + ((size_t)sy * input->width + sx) * 4;
 
-                    nx += (double)p[0] / 127.5 - 1.0;
+                    /* The Swapper stores normal maps in DXT5nm layout: X in alpha, Y in green, Z in blue. */
+                    nx += (double)p[3] / 127.5 - 1.0;
                     ny += (double)p[1] / 127.5 - 1.0;
                     nz += (double)p[2] / 127.5 - 1.0;
-                    alpha += p[3];
                     count++;
                 }
             }
@@ -424,10 +423,10 @@ static struct image resample_normal_map(const struct image *input, uint32_t out_
                     nz /= length;
                 }
 
-                p[0] = encode_component(nx * 0.5 + 0.5);
+                p[0] = 0;
                 p[1] = encode_component(ny * 0.5 + 0.5);
                 p[2] = encode_component(nz * 0.5 + 0.5);
-                p[3] = encode_component(alpha / (count * 255.0));
+                p[3] = encode_component(nx * 0.5 + 0.5);
             }
         }
     }
