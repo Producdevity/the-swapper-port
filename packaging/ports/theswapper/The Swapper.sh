@@ -35,7 +35,7 @@ run_setup() {
     exit 1
   fi
 
-  export PATCHER_FILE="$GAMEDIR/tools/setup.sh"
+  export PATCHER_FILE="$GAMEDIR/tools/setup.bash"
   export PATCHER_GAME="The Swapper"
   export PATCHER_TIME="a few seconds"
 
@@ -74,7 +74,7 @@ elif [ ! -x "$MONO_DIR/bin/mono" ] && ! command -v mono >/dev/null 2>&1; then
   exit 1
 fi
 
-cd "$GAMEDATA" || exit 1
+cd "$GAMEDIR" || exit 1
 
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
@@ -82,9 +82,10 @@ export HOME="$SAVEDIR"
 export PATH="$GAMEDIR/tools:$MONO_DIR/bin:$PATH"
 export BROWSER="$GAMEDIR/tools/xdg-open"
 export MONO_PATH="$GAMEDATA"
-export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$GAMEDIR/gl4es.${DEVICE_ARCH}:${LD_LIBRARY_PATH:-}"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export MONO_MANAGED_WATCHER=1
+
+BASE_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 
 if [ -f "${controlfolder}/libgl_${CFW_NAME}.txt" ]; then
   # shellcheck source=/dev/null
@@ -94,15 +95,29 @@ else
   source "${controlfolder}/libgl_default.txt"
 fi
 
-if [[ "${LIBGL_ES:-}" != "" ]]; then
+PORT_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
+if [ -n "${LIBGL_FB:-}" ] && [ "${CFW_NAME^^}" != "KNULLI" ] && [ "${DEVICE_ARCH}" != "x86_64" ]; then
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libGL.so.1"
   export SDL_VIDEO_EGL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libEGL.so.1"
 fi
 
+if [ -n "$BASE_LD_LIBRARY_PATH" ]; then
+  export LD_LIBRARY_PATH="$BASE_LD_LIBRARY_PATH"
+else
+  unset LD_LIBRARY_PATH
+fi
+
+cd "$GAMEDATA" || exit 1
+
 $GPTOKEYB "mono" &
 pm_platform_helper "$MONO_DIR/bin/mono"
 
-${TASKSET:-} mono TheSwapper.exe
+if [ -n "${TASKSET:-}" ]; then
+  ${TASKSET} env LD_LIBRARY_PATH="$PORT_LD_LIBRARY_PATH" mono TheSwapper.exe
+else
+  env LD_LIBRARY_PATH="$PORT_LD_LIBRARY_PATH" mono TheSwapper.exe
+fi
 status=$?
 
 if [[ "${PM_CAN_MOUNT:-Y}" != "N" ]]; then

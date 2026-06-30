@@ -1,6 +1,7 @@
 override CC := $(if $(filter default,$(origin CC)),aarch64-linux-gnu-gcc,$(CC))
 BUILD_DIR ?= build
 PACKAGE_DIR ?= $(BUILD_DIR)/package
+RELEASE_DIR ?= $(BUILD_DIR)/release
 PORT_DIR := $(PACKAGE_DIR)/ports/theswapper
 LIB_DIR := $(BUILD_DIR)/libs.aarch64
 TOOL_DIR := $(BUILD_DIR)/tools.aarch64
@@ -55,12 +56,23 @@ package: all
 	cp -R packaging/ports/theswapper/. "$(PORT_DIR)/"
 	cp -R "$(LIB_DIR)/." "$(PORT_DIR)/theswapper/libs.aarch64/"
 	cp -R "$(TOOL_DIR)/." "$(PORT_DIR)/theswapper/tools/"
-	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup.sh" \
+	find "$(PACKAGE_DIR)" -name .DS_Store -delete
+	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup.bash" \
 	  "$(PORT_DIR)/theswapper/tools/xdg-open" "$(PORT_DIR)/theswapper/tools/normalmap-downscale"
 
 zip: package
+	rm -rf "$(RELEASE_DIR)"
 	rm -f "$(ZIP)"
-	cd "$(PACKAGE_DIR)" && zip -qr "../theswapper.zip" ports
+	mkdir -p "$(RELEASE_DIR)/theswapper"
+	cp "$(PORT_DIR)/The Swapper.sh" "$(RELEASE_DIR)/"
+	cp -R "$(PORT_DIR)/theswapper/." "$(RELEASE_DIR)/theswapper/"
+	cp "$(PORT_DIR)/port.json" "$(RELEASE_DIR)/theswapper/port.json"
+	cp "$(PORT_DIR)/gameinfo.xml" "$(RELEASE_DIR)/theswapper/gameinfo.xml"
+	cp "$(PORT_DIR)/README.md" "$(RELEASE_DIR)/theswapper/theswapper.md"
+	cp "$(PORT_DIR)/cover.png" "$(RELEASE_DIR)/theswapper/cover.png"
+	cp "$(PORT_DIR)/screenshot.png" "$(RELEASE_DIR)/theswapper/screenshot.png"
+	find "$(RELEASE_DIR)" -name .DS_Store -delete
+	cd "$(RELEASE_DIR)" && zip -qr "../theswapper.zip" .
 
 docker-build:
 	docker build -t theswapper-port-build .

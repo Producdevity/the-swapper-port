@@ -16,7 +16,7 @@ package_root="build/package/ports/theswapper"
 launcher="$package_root/The Swapper.sh"
 payload="$package_root/theswapper"
 
-for required in "$launcher" "$payload/libs.aarch64/libfmodex.so" "$payload/tools/setup.sh" "$payload/tools/xdg-open"; do
+for required in "$launcher" "$payload/libs.aarch64/libfmodex.so" "$payload/tools/setup.bash" "$payload/tools/xdg-open"; do
   if [ ! -e "$required" ]; then
     echo "Missing package file: $required" >&2
     exit 1
@@ -72,7 +72,7 @@ pids="$(ps w | awk '/[m]ono TheSwapper\.exe/ { print $1 }')"
 [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true
 
 mv "$portdir/The Swapper.sh.tmp" "$portdir/The Swapper.sh"
-chmod 755 "$portdir/The Swapper.sh" "$gamedir/tools/setup.sh" "$gamedir/tools/xdg-open"
+chmod 755 "$portdir/The Swapper.sh" "$gamedir/tools/setup.bash" "$gamedir/tools/xdg-open"
 
 if [ "$reset_setup" = "1" ]; then
   rm -f \
@@ -82,7 +82,7 @@ if [ "$reset_setup" = "1" ]; then
   rm -rf "$gamedir/asset-patches/normal-maps"
 fi
 
-ls -l "$portdir/The Swapper.sh" "$gamedir/tools/setup.sh" "$gamedir/tools/xdg-open" "$gamedir/libs.aarch64/libfmodex.so"
+ls -l "$portdir/The Swapper.sh" "$gamedir/tools/setup.bash" "$gamedir/tools/xdg-open" "$gamedir/libs.aarch64/libfmodex.so"
 
 if [ ! -f "$gamedir/gamedata/TheSwapper.exe" ]; then
   echo "Note: copy the Steam Windows files into $gamedir/gamedata before launching." >&2
