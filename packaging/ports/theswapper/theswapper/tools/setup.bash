@@ -83,7 +83,7 @@ apply_handheld_profile_defaults() {
     set_profile_value "$profile" "PostFxMotionBlurQuality" "False"
     set_profile_value "$profile" "PostFxBloomQuality" "0"
     set_profile_value "$profile" "LightShaftQuality" "0"
-    set_profile_value "$profile" "GBufferSampleAntialising" "0"
+    set_profile_value "$profile" "GBufferSampleAntialising" "1"
     set_profile_value "$profile" "Dithering" "False"
     set_profile_value "$profile" "Vignette" "0"
     set_profile_value "$profile" "HiResEdges" "False"

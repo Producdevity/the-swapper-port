@@ -51,6 +51,7 @@ rsync -rt --delete --no-owner --no-group --omit-dir-times \
   --exclude gamedata/ \
   --exclude savedata-home/ \
   --exclude savedata/ \
+  --exclude asset-patches/ \
   --exclude .setup_complete \
   "$payload/" "$host:$gamedir/"
 scp "$launcher" "$host:$portdir/The Swapper.sh.tmp"
