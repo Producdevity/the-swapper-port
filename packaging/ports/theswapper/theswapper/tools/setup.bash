@@ -69,29 +69,23 @@ set_profile_value() {
   fi
 }
 
-apply_handheld_profile_defaults() {
+clamp_profile_quality() {
   for profile in "$PROFILE_DIR"/*.pro; do
     [ -f "$profile" ] || continue
 
-    set_profile_value "$profile" "MaxAudioChannels" "24"
-    set_profile_value "$profile" "ShadowQuality" "0"
-    set_profile_value "$profile" "DiffuseQuality" "0"
-    set_profile_value "$profile" "ParticleQuality" "0"
-    set_profile_value "$profile" "IsFilmlookEnabled" "False"
-    set_profile_value "$profile" "IsPostFxEnabled" "False"
-    set_profile_value "$profile" "PostFxBlurQuality" "0"
-    set_profile_value "$profile" "PostFxMotionBlurQuality" "False"
-    set_profile_value "$profile" "PostFxBloomQuality" "0"
-    set_profile_value "$profile" "LightShaftQuality" "0"
-    set_profile_value "$profile" "GBufferSampleAntialising" "1"
-    set_profile_value "$profile" "Dithering" "False"
-    set_profile_value "$profile" "Vignette" "0"
-    set_profile_value "$profile" "HiResEdges" "False"
-    set_profile_value "$profile" "IsVsyncEnabled" "False"
-    set_profile_value "$profile" "XResolution" "640"
-    set_profile_value "$profile" "YResolution" "480"
-    set_profile_value "$profile" "SmoothSampling" "False"
-    set_profile_value "$profile" "Antialising" "False"
+    for key in \
+      ShadowQuality \
+      DiffuseQuality \
+      ParticleQuality \
+      PostFxBlurQuality \
+      PostFxBloomQuality \
+      LightShaftQuality \
+      GBufferSampleAntialising \
+      Vignette; do
+      if grep -q "^${key} 0$" "$profile"; then
+        set_profile_value "$profile" "$key" "1"
+      fi
+    done
   done
 }
 
@@ -107,7 +101,7 @@ if ! find "$PROFILE_DIR" -maxdepth 1 -type f -name "*.pro" | grep -q .; then
   cp "$GAMEDIR/savedata-seed/"* "$PROFILE_DIR/"
 fi
 
-apply_handheld_profile_defaults
+clamp_profile_quality
 
 touch "$SETUP_MARKER"
 echo "Setup complete."
