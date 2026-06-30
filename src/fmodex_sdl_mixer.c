@@ -3,17 +3,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 typedef int32_t FMOD_RESULT;
+typedef int64_t sf_count_t;
 
 #define FMOD_OK 0
 #define SOUND_MAGIC 0x53575053u
 #define CHANNEL_MAGIC 0x53575043u
+#define MAX_STREAM_CHANNELS 16
+#define STREAM_DECODE_FRAMES 1024
+#define STREAM_FILE_THRESHOLD_BYTES (1024 * 1024)
+#define SFM_READ 0x10
 
 typedef struct FmodSound
 {
     uint32_t magic;
     void *chunk;
+    int streamed;
     int loop_count;
     float volume;
     char path[1024];
@@ -23,36 +30,75 @@ typedef struct FmodChannel
 {
     uint32_t magic;
     int mixer_channel;
+    int stream_slot;
     FmodSound *sound;
 } FmodChannel;
 
+typedef struct SF_INFO
+{
+    sf_count_t frames;
+    int samplerate;
+    int channels;
+    int format;
+    int sections;
+    int seekable;
+} SF_INFO;
+
+typedef struct StreamSlot
+{
+    int active;
+    int paused;
+    int loops_remaining;
+    float volume;
+    void *file;
+    SF_INFO info;
+} StreamSlot;
+
 typedef void *(*SDL_RWFromFileFn)(const char *, const char *);
+typedef void (*SDL_LockAudioFn)(void);
+typedef void (*SDL_UnlockAudioFn)(void);
 typedef int (*Mix_OpenAudioFn)(int, uint16_t, int, int);
 typedef int (*Mix_AllocateChannelsFn)(int);
 typedef void *(*Mix_LoadWAV_RWFn)(void *, int);
 typedef int (*Mix_PlayChannelTimedFn)(int, void *, int, int);
+typedef void (*Mix_SetPostMixFn)(void (*)(void *, uint8_t *, int), void *);
 typedef int (*Mix_VolumeFn)(int, int);
 typedef int (*Mix_PauseFn)(int);
 typedef int (*Mix_ResumeFn)(int);
 typedef int (*Mix_HaltChannelFn)(int);
 typedef int (*Mix_PlayingFn)(int);
 typedef void (*Mix_FreeChunkFn)(void *);
+typedef void *(*SfOpenFn)(const char *, int, SF_INFO *);
+typedef sf_count_t (*SfReadfShortFn)(void *, short *, sf_count_t);
+typedef sf_count_t (*SfSeekFn)(void *, sf_count_t, int);
+typedef int (*SfCloseFn)(void *);
 
 static uintptr_t next_handle = 0x10000;
 static int audio_loaded;
 static int audio_ready;
+static int stream_loaded;
+static int stream_ready;
+static int postmix_installed;
 
 static SDL_RWFromFileFn p_SDL_RWFromFile;
+static SDL_LockAudioFn p_SDL_LockAudio;
+static SDL_UnlockAudioFn p_SDL_UnlockAudio;
 static Mix_OpenAudioFn p_Mix_OpenAudio;
 static Mix_AllocateChannelsFn p_Mix_AllocateChannels;
 static Mix_LoadWAV_RWFn p_Mix_LoadWAV_RW;
 static Mix_PlayChannelTimedFn p_Mix_PlayChannelTimed;
+static Mix_SetPostMixFn p_Mix_SetPostMix;
 static Mix_VolumeFn p_Mix_Volume;
 static Mix_PauseFn p_Mix_Pause;
 static Mix_ResumeFn p_Mix_Resume;
 static Mix_HaltChannelFn p_Mix_HaltChannel;
 static Mix_PlayingFn p_Mix_Playing;
 static Mix_FreeChunkFn p_Mix_FreeChunk;
+static SfOpenFn p_sf_open;
+static SfReadfShortFn p_sf_readf_short;
+static SfSeekFn p_sf_seek;
+static SfCloseFn p_sf_close;
+static StreamSlot stream_slots[MAX_STREAM_CHANNELS];
 
 static void *new_handle(void)
 {
@@ -93,6 +139,110 @@ static void *load_symbol(void *library, const char *name)
     return library != NULL ? dlsym(library, name) : NULL;
 }
 
+static void lock_audio(void)
+{
+    if (p_SDL_LockAudio != NULL)
+        p_SDL_LockAudio();
+}
+
+static void unlock_audio(void)
+{
+    if (p_SDL_UnlockAudio != NULL)
+        p_SDL_UnlockAudio();
+}
+
+static int clamp_sample(int value)
+{
+    if (value > 32767)
+        return 32767;
+    if (value < -32768)
+        return -32768;
+    return value;
+}
+
+static void close_stream_slot(StreamSlot *slot)
+{
+    if (slot->file != NULL && p_sf_close != NULL)
+        p_sf_close(slot->file);
+    memset(slot, 0, sizeof(*slot));
+}
+
+static int init_streaming(void)
+{
+    if (stream_loaded)
+        return stream_ready;
+
+    stream_loaded = 1;
+
+    void *sndfile = dlopen("libsndfile.so.1", RTLD_LAZY | RTLD_GLOBAL);
+    p_sf_open = (SfOpenFn)load_symbol(sndfile, "sf_open");
+    p_sf_readf_short = (SfReadfShortFn)load_symbol(sndfile, "sf_readf_short");
+    p_sf_seek = (SfSeekFn)load_symbol(sndfile, "sf_seek");
+    p_sf_close = (SfCloseFn)load_symbol(sndfile, "sf_close");
+
+    stream_ready = p_Mix_SetPostMix != NULL &&
+        p_sf_open != NULL &&
+        p_sf_readf_short != NULL &&
+        p_sf_seek != NULL &&
+        p_sf_close != NULL;
+    return stream_ready;
+}
+
+static void stream_postmix(void *userdata, uint8_t *stream, int len)
+{
+    (void)userdata;
+
+    int16_t *output = (int16_t *)stream;
+    int total_frames = len / (int)(sizeof(int16_t) * 2);
+    short decode[STREAM_DECODE_FRAMES * 2];
+
+    for (int slot_index = 0; slot_index < MAX_STREAM_CHANNELS; slot_index++)
+    {
+        StreamSlot *slot = &stream_slots[slot_index];
+        if (!slot->active || slot->paused || slot->file == NULL)
+            continue;
+
+        int frame_offset = 0;
+        while (frame_offset < total_frames && slot->active)
+        {
+            int wanted = total_frames - frame_offset;
+            if (wanted > STREAM_DECODE_FRAMES)
+                wanted = STREAM_DECODE_FRAMES;
+
+            sf_count_t read_frames = p_sf_readf_short(slot->file, decode, wanted);
+            if (read_frames <= 0)
+            {
+                if (slot->loops_remaining == -1 || slot->loops_remaining > 0)
+                {
+                    if (slot->loops_remaining > 0)
+                        slot->loops_remaining--;
+                    p_sf_seek(slot->file, 0, SEEK_SET);
+                    continue;
+                }
+
+                close_stream_slot(slot);
+                break;
+            }
+
+            for (int frame = 0; frame < read_frames; frame++)
+            {
+                int source = frame * slot->info.channels;
+                int target = (frame_offset + frame) * 2;
+                int left = decode[source];
+                int right = slot->info.channels > 1 ? decode[source + 1] : left;
+
+                left = (int)(left * slot->volume);
+                right = (int)(right * slot->volume);
+
+                output[target] = (int16_t)clamp_sample(output[target] + left);
+                output[target + 1] = (int16_t)clamp_sample(output[target + 1] + right);
+            }
+
+            frame_offset += (int)read_frames;
+        }
+    }
+}
+
 static int init_audio(void)
 {
     if (audio_loaded)
@@ -104,10 +254,13 @@ static int init_audio(void)
     void *mixer = dlopen("libSDL2_mixer-2.0.so.0", RTLD_LAZY | RTLD_GLOBAL);
 
     p_SDL_RWFromFile = (SDL_RWFromFileFn)load_symbol(sdl, "SDL_RWFromFile");
+    p_SDL_LockAudio = (SDL_LockAudioFn)load_symbol(sdl, "SDL_LockAudio");
+    p_SDL_UnlockAudio = (SDL_UnlockAudioFn)load_symbol(sdl, "SDL_UnlockAudio");
     p_Mix_OpenAudio = (Mix_OpenAudioFn)load_symbol(mixer, "Mix_OpenAudio");
     p_Mix_AllocateChannels = (Mix_AllocateChannelsFn)load_symbol(mixer, "Mix_AllocateChannels");
     p_Mix_LoadWAV_RW = (Mix_LoadWAV_RWFn)load_symbol(mixer, "Mix_LoadWAV_RW");
     p_Mix_PlayChannelTimed = (Mix_PlayChannelTimedFn)load_symbol(mixer, "Mix_PlayChannelTimed");
+    p_Mix_SetPostMix = (Mix_SetPostMixFn)load_symbol(mixer, "Mix_SetPostMix");
     p_Mix_Volume = (Mix_VolumeFn)load_symbol(mixer, "Mix_Volume");
     p_Mix_Pause = (Mix_PauseFn)load_symbol(mixer, "Mix_Pause");
     p_Mix_Resume = (Mix_ResumeFn)load_symbol(mixer, "Mix_Resume");
@@ -123,6 +276,12 @@ static int init_audio(void)
 
     if (p_Mix_AllocateChannels != NULL)
         p_Mix_AllocateChannels(32);
+
+    if (init_streaming() && !postmix_installed)
+    {
+        p_Mix_SetPostMix(stream_postmix, NULL);
+        postmix_installed = 1;
+    }
 
     audio_ready = 1;
     return 1;
@@ -140,6 +299,11 @@ static FmodChannel *as_channel(void *handle)
     return channel != NULL && channel->magic == CHANNEL_MAGIC ? channel : NULL;
 }
 
+static int valid_stream_slot(int slot)
+{
+    return slot >= 0 && slot < MAX_STREAM_CHANNELS;
+}
+
 static int has_audio_extension(const char *path)
 {
     return path != NULL && (
@@ -147,6 +311,24 @@ static int has_audio_extension(const char *path)
         strstr(path, ".wav") != NULL ||
         strstr(path, ".OGG") != NULL ||
         strstr(path, ".WAV") != NULL);
+}
+
+static int64_t get_file_size(const char *path)
+{
+    struct stat st;
+    if (path == NULL || stat(path, &st) != 0)
+        return 0;
+    return st.st_size;
+}
+
+static int should_stream_sound(const char *path, int requested_stream)
+{
+    if (!has_audio_extension(path))
+        return 0;
+    if (requested_stream)
+        return 1;
+
+    return get_file_size(path) >= STREAM_FILE_THRESHOLD_BYTES;
 }
 
 static void clear_guid(void *guid)
@@ -167,7 +349,7 @@ static void clear_wide_string(char *buffer, int32_t length)
         ((uint16_t *)buffer)[0] = 0;
 }
 
-static FmodSound *create_sound(const char *path)
+static FmodSound *create_sound(const char *path, int requested_stream)
 {
     FmodSound *sound = calloc(1, sizeof(*sound));
     if (sound == NULL)
@@ -180,6 +362,7 @@ static FmodSound *create_sound(const char *path)
     if (has_audio_extension(path))
     {
         strncpy(sound->path, path, sizeof(sound->path) - 1);
+        sound->streamed = should_stream_sound(sound->path, requested_stream);
         trace_value("FMOD_LoadPath", sound->path);
     }
 
@@ -203,7 +386,7 @@ static int load_sound(FmodSound *sound)
     return sound->chunk != NULL;
 }
 
-static FmodChannel *play_sound(FmodSound *sound, int paused)
+static FmodChannel *play_chunk_sound(FmodSound *sound, int paused)
 {
     FmodChannel *channel = calloc(1, sizeof(*channel));
     if (channel == NULL)
@@ -211,6 +394,7 @@ static FmodChannel *play_sound(FmodSound *sound, int paused)
 
     channel->magic = CHANNEL_MAGIC;
     channel->mixer_channel = -1;
+    channel->stream_slot = -1;
     channel->sound = sound;
 
     if (load_sound(sound))
@@ -230,6 +414,74 @@ static FmodChannel *play_sound(FmodSound *sound, int paused)
     }
 
     return channel;
+}
+
+static FmodChannel *play_stream_sound(FmodSound *sound, int paused)
+{
+    if (sound == NULL || sound->path[0] == '\0' || !init_audio() || !init_streaming())
+        return NULL;
+
+    SF_INFO info;
+    memset(&info, 0, sizeof(info));
+    void *file = p_sf_open(sound->path, SFM_READ, &info);
+    if (file == NULL)
+        return NULL;
+
+    if (info.samplerate != 44100 || info.channels < 1 || info.channels > 2)
+    {
+        p_sf_close(file);
+        return NULL;
+    }
+
+    FmodChannel *channel = calloc(1, sizeof(*channel));
+    if (channel == NULL)
+    {
+        p_sf_close(file);
+        return NULL;
+    }
+
+    channel->magic = CHANNEL_MAGIC;
+    channel->mixer_channel = -1;
+    channel->stream_slot = -1;
+    channel->sound = sound;
+
+    lock_audio();
+    for (int i = 0; i < MAX_STREAM_CHANNELS; i++)
+    {
+        if (!stream_slots[i].active)
+        {
+            stream_slots[i].active = 1;
+            stream_slots[i].paused = paused ? 1 : 0;
+            stream_slots[i].loops_remaining = sound->loop_count;
+            stream_slots[i].volume = sound->volume;
+            stream_slots[i].file = file;
+            stream_slots[i].info = info;
+            channel->stream_slot = i;
+            break;
+        }
+    }
+    unlock_audio();
+
+    if (channel->stream_slot < 0)
+    {
+        p_sf_close(file);
+        free(channel);
+        return NULL;
+    }
+
+    return channel;
+}
+
+static FmodChannel *play_sound(FmodSound *sound, int paused)
+{
+    if (sound != NULL && sound->streamed)
+    {
+        FmodChannel *stream = play_stream_sound(sound, paused);
+        if (stream != NULL)
+            return stream;
+    }
+
+    return play_chunk_sound(sound, paused);
 }
 
 FMOD_RESULT FMOD_System_Create(void **system)
@@ -256,7 +508,7 @@ FMOD_RESULT FMOD_System_CreateSound(void *system, const char *path, int32_t mode
     (void)mode;
     (void)info;
     trace_call("FMOD_System_CreateSound");
-    FmodSound *created = create_sound(path);
+    FmodSound *created = create_sound(path, 0);
     if (sound != NULL)
         *sound = created != NULL ? created : new_handle();
     return FMOD_OK;
@@ -264,7 +516,14 @@ FMOD_RESULT FMOD_System_CreateSound(void *system, const char *path, int32_t mode
 
 FMOD_RESULT FMOD_System_CreateStream(void *system, const char *path, int32_t mode, void *info, void **sound)
 {
-    return FMOD_System_CreateSound(system, path, mode, info, sound);
+    (void)system;
+    (void)mode;
+    (void)info;
+    trace_call("FMOD_System_CreateStream");
+    FmodSound *created = create_sound(path, 1);
+    if (sound != NULL)
+        *sound = created != NULL ? created : new_handle();
+    return FMOD_OK;
 }
 
 FMOD_RESULT FMOD_System_PlaySound(void *system, int32_t channel_id, void *sound_handle, int32_t paused, void **channel)
@@ -357,6 +616,15 @@ FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume)
 {
     trace_call("FMOD_Channel_SetVolume");
     FmodChannel *channel = as_channel(channel_handle);
+    if (channel != NULL && valid_stream_slot(channel->stream_slot))
+    {
+        lock_audio();
+        if (stream_slots[channel->stream_slot].active)
+            stream_slots[channel->stream_slot].volume = volume;
+        unlock_audio();
+        return FMOD_OK;
+    }
+
     if (channel != NULL && channel->mixer_channel >= 0 && p_Mix_Volume != NULL)
     {
         int mixer_volume = (int)(volume * 128.0f);
@@ -373,6 +641,15 @@ FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused)
 {
     trace_call("FMOD_Channel_SetPaused");
     FmodChannel *channel = as_channel(channel_handle);
+    if (channel != NULL && valid_stream_slot(channel->stream_slot))
+    {
+        lock_audio();
+        if (stream_slots[channel->stream_slot].active)
+            stream_slots[channel->stream_slot].paused = paused ? 1 : 0;
+        unlock_audio();
+        return FMOD_OK;
+    }
+
     if (channel != NULL && channel->mixer_channel >= 0)
     {
         if (paused && p_Mix_Pause != NULL)
@@ -387,6 +664,13 @@ FMOD_RESULT FMOD_Channel_IsPlaying(void *channel_handle, int32_t *playing)
 {
     trace_call("FMOD_Channel_IsPlaying");
     FmodChannel *channel = as_channel(channel_handle);
+    if (channel != NULL && valid_stream_slot(channel->stream_slot))
+    {
+        if (playing != NULL)
+            *playing = stream_slots[channel->stream_slot].active ? 1 : 0;
+        return FMOD_OK;
+    }
+
     if (playing != NULL)
         *playing = channel != NULL && channel->mixer_channel >= 0 && p_Mix_Playing != NULL
             ? p_Mix_Playing(channel->mixer_channel)
@@ -398,6 +682,16 @@ FMOD_RESULT FMOD_Channel_Stop(void *channel_handle)
 {
     trace_call("FMOD_Channel_Stop");
     FmodChannel *channel = as_channel(channel_handle);
+    if (channel != NULL && valid_stream_slot(channel->stream_slot))
+    {
+        lock_audio();
+        if (stream_slots[channel->stream_slot].active)
+            close_stream_slot(&stream_slots[channel->stream_slot]);
+        unlock_audio();
+        channel->stream_slot = -1;
+        return FMOD_OK;
+    }
+
     if (channel != NULL && channel->mixer_channel >= 0 && p_Mix_HaltChannel != NULL)
         p_Mix_HaltChannel(channel->mixer_channel);
     return FMOD_OK;
@@ -653,6 +947,13 @@ FMOD_RESULT FMOD_System_Release(void *system)
 {
     (void)system;
     trace_call("FMOD_System_Release");
+    lock_audio();
+    for (int i = 0; i < MAX_STREAM_CHANNELS; i++)
+    {
+        if (stream_slots[i].active)
+            close_stream_slot(&stream_slots[i]);
+    }
+    unlock_audio();
     return FMOD_OK;
 }
 

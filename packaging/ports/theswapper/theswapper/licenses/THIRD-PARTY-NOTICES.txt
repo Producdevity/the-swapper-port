@@ -39,6 +39,10 @@ Packaged third-party support libraries:
 - libs.aarch64/libogg.so.0
   License: LICENSE.libogg.txt
 
+- libs.aarch64/libvorbis.so.0
+- libs.aarch64/libvorbisenc.so.2
+  License: LICENSE.libvorbis.txt
+
 - libs.aarch64/libopus.so.0
   License: LICENSE.Opus.txt
 
@@ -103,6 +107,7 @@ Source references:
 - SDL2_ttf: https://github.com/libsdl-org/SDL_ttf
 - FLAC: https://github.com/xiph/flac
 - libogg: https://github.com/xiph/ogg
+- libvorbis: https://github.com/xiph/vorbis
 - Opus: https://github.com/xiph/opus
 - Opusfile: https://github.com/xiph/opusfile
 - FluidSynth: https://github.com/FluidSynth/fluidsynth
