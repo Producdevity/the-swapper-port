@@ -23,9 +23,10 @@ SAVEDIR="$GAMEDIR/savedata-home"
 PROFILE_DIR="$SAVEDIR/.local/share/Facepalm Games/The Swapper 1000"
 SETUP_LOG="$GAMEDIR/setup.log"
 NORMAL_MAP_MAX_DIMENSION=512
-NORMAL_MAP_STATE_DIR="$GAMEDIR/asset-patches/normal-maps"
-NORMAL_MAP_MARKER="$NORMAL_MAP_STATE_DIR/downscaled-${NORMAL_MAP_MAX_DIMENSION}"
-NORMAL_MAP_DOWNSCALER="$GAMEDIR/tools/normalmap-downscale"
+ATLAS_MAX_DIMENSION=1024
+TEXTURE_STATE_DIR="$GAMEDIR/asset-patches/textures"
+TEXTURE_MARKER="$TEXTURE_STATE_DIR/normal-${NORMAL_MAP_MAX_DIMENSION}-atlas-${ATLAS_MAX_DIMENSION}"
+TEXTURE_DOWNSCALER="$GAMEDIR/tools/texture-downscale"
 SETUP_MARKER="$GAMEDIR/.setup_complete"
 
 mkdir -p "$GAMEDATA" "$PROFILE_DIR"
@@ -46,47 +47,18 @@ require_dir() {
   [ -d "$1" ] || fail "$2"
 }
 
-patch_normal_maps() {
-  [ -f "$NORMAL_MAP_MARKER" ] && return 0
+patch_textures() {
+  [ -f "$TEXTURE_MARKER" ] && return 0
 
   require_dir "$GAMEDATA/data/textures" "Missing texture data. Copy the full Steam Windows install into ports/theswapper/gamedata."
-  require_file "$NORMAL_MAP_DOWNSCALER" "Port install is incomplete: missing normal-map downscaler."
+  require_file "$TEXTURE_DOWNSCALER" "Port install is incomplete: missing texture downscaler."
 
-  mkdir -p "$NORMAL_MAP_STATE_DIR"
-  "$NORMAL_MAP_DOWNSCALER" "$GAMEDATA" "$NORMAL_MAP_MAX_DIMENSION" || fail "Failed to downscale normal maps."
-  printf 'max_dimension=%s\n' "$NORMAL_MAP_MAX_DIMENSION" > "$NORMAL_MAP_MARKER"
-}
-
-set_profile_value() {
-  profile="$1"
-  key="$2"
-  value="$3"
-
-  if grep -q "^${key} " "$profile"; then
-    sed -i "s#^${key} .*#${key} ${value}#" "$profile"
-  else
-    printf '%s %s\n' "$key" "$value" >> "$profile"
-  fi
-}
-
-clamp_profile_quality() {
-  for profile in "$PROFILE_DIR"/*.pro; do
-    [ -f "$profile" ] || continue
-
-    for key in \
-      ShadowQuality \
-      DiffuseQuality \
-      ParticleQuality \
-      PostFxBlurQuality \
-      PostFxBloomQuality \
-      LightShaftQuality \
-      GBufferSampleAntialising \
-      Vignette; do
-      if grep -q "^${key} 0$" "$profile"; then
-        set_profile_value "$profile" "$key" "1"
-      fi
-    done
-  done
+  mkdir -p "$TEXTURE_STATE_DIR"
+  "$TEXTURE_DOWNSCALER" "$GAMEDATA" "$NORMAL_MAP_MAX_DIMENSION" "$ATLAS_MAX_DIMENSION" || fail "Failed to downscale texture assets."
+  {
+    printf 'normal_map_max_dimension=%s\n' "$NORMAL_MAP_MAX_DIMENSION"
+    printf 'atlas_max_dimension=%s\n' "$ATLAS_MAX_DIMENSION"
+  } > "$TEXTURE_MARKER"
 }
 
 require_file "$GAMEDATA/TheSwapper.exe" "Missing TheSwapper.exe. Copy the Steam Windows files into ports/theswapper/gamedata."
@@ -95,13 +67,11 @@ require_dir "$GAMEDATA/data" "Missing data directory. Copy the full Steam Window
 require_file "$GAMEDIR/config/TheSwapper.exe.config" "Port install is incomplete: missing TheSwapper.exe.config."
 
 cp "$GAMEDIR/config/TheSwapper.exe.config" "$GAMEDATA/TheSwapper.exe.config"
-patch_normal_maps
+patch_textures
 
 if ! find "$PROFILE_DIR" -maxdepth 1 -type f -name "*.pro" | grep -q .; then
   cp "$GAMEDIR/savedata-seed/"* "$PROFILE_DIR/"
 fi
-
-clamp_profile_quality
 
 touch "$SETUP_MARKER"
 echo "Setup complete."

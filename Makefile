@@ -19,7 +19,7 @@ NATIVE_LIBS := \
   $(LIB_DIR)/libfmodex.so
 
 NATIVE_TOOLS := \
-  $(TOOL_DIR)/normalmap-downscale
+  $(TOOL_DIR)/texture-downscale
 
 all: $(NATIVE_LIBS) $(NATIVE_TOOLS) aliases
 
@@ -41,7 +41,7 @@ $(LIB_DIR)/libsdkencryptedappticket.so: src/steam_stub.c | $(LIB_DIR)
 $(LIB_DIR)/libfmodex.so: src/fmodex_sdl_mixer.c | $(LIB_DIR)
 	$(CC) $(CFLAGS) -shared $(LDFLAGS) -o $@ $< -ldl
 
-$(TOOL_DIR)/normalmap-downscale: src/normalmap_downscale.c | $(TOOL_DIR)
+$(TOOL_DIR)/texture-downscale: src/texture_downscale.c | $(TOOL_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
 aliases: $(LIB_DIR)/libwindows_stub.so
@@ -58,7 +58,7 @@ package: all
 	cp -R "$(TOOL_DIR)/." "$(PORT_DIR)/theswapper/tools/"
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
 	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup.bash" \
-	  "$(PORT_DIR)/theswapper/tools/xdg-open" "$(PORT_DIR)/theswapper/tools/normalmap-downscale"
+	  "$(PORT_DIR)/theswapper/tools/xdg-open" "$(PORT_DIR)/theswapper/tools/texture-downscale"
 
 zip: package
 	rm -rf "$(RELEASE_DIR)"

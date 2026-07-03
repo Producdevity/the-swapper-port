@@ -40,6 +40,19 @@ struct image
     unsigned char *rgba;
 };
 
+struct patch_counts
+{
+    int normal_maps;
+    int atlases;
+};
+
+enum patch_kind
+{
+    PATCH_NONE,
+    PATCH_NORMAL_MAP,
+    PATCH_ATLAS
+};
+
 static uint32_t read_be32(const unsigned char *p)
 {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
@@ -461,6 +474,90 @@ static struct image downscale_normal_map(const struct image *input, uint32_t max
     return resample_normal_map(input, out_width, out_height);
 }
 
+static struct image resample_rgba_image(const struct image *input, uint32_t out_width, uint32_t out_height)
+{
+    struct image output = {0};
+
+    output.rgba = malloc((size_t)out_width * out_height * 4);
+    if (output.rgba == NULL)
+        return output;
+
+    output.width = out_width;
+    output.height = out_height;
+
+    for (uint32_t y = 0; y < out_height; y++)
+    {
+        uint32_t y0 = (uint32_t)(((uint64_t)y * input->height) / out_height);
+        uint32_t y1 = (uint32_t)(((uint64_t)(y + 1) * input->height) / out_height);
+
+        if (y1 <= y0)
+            y1 = y0 + 1;
+
+        for (uint32_t x = 0; x < out_width; x++)
+        {
+            uint32_t x0 = (uint32_t)(((uint64_t)x * input->width) / out_width);
+            uint32_t x1 = (uint32_t)(((uint64_t)(x + 1) * input->width) / out_width);
+            uint64_t sum[4] = {0, 0, 0, 0};
+            uint32_t count = 0;
+            unsigned char *dst = output.rgba + ((size_t)y * out_width + x) * 4;
+
+            if (x1 <= x0)
+                x1 = x0 + 1;
+
+            for (uint32_t sy = y0; sy < y1; sy++)
+            {
+                for (uint32_t sx = x0; sx < x1; sx++)
+                {
+                    const unsigned char *src = input->rgba + ((size_t)sy * input->width + sx) * 4;
+
+                    sum[0] += src[0];
+                    sum[1] += src[1];
+                    sum[2] += src[2];
+                    sum[3] += src[3];
+                    count++;
+                }
+            }
+
+            if (count != 0)
+            {
+                dst[0] = (unsigned char)((sum[0] + count / 2) / count);
+                dst[1] = (unsigned char)((sum[1] + count / 2) / count);
+                dst[2] = (unsigned char)((sum[2] + count / 2) / count);
+                dst[3] = (unsigned char)((sum[3] + count / 2) / count);
+            }
+        }
+    }
+
+    return output;
+}
+
+static struct image downscale_rgba_image(const struct image *input, uint32_t max_dimension)
+{
+    uint32_t out_width;
+    uint32_t out_height;
+
+    if (input->width <= max_dimension && input->height <= max_dimension)
+        return (struct image){0};
+
+    if (input->width >= input->height)
+    {
+        out_width = max_dimension;
+        out_height = (uint32_t)(((uint64_t)input->height * max_dimension + input->width / 2) / input->width);
+    }
+    else
+    {
+        out_height = max_dimension;
+        out_width = (uint32_t)(((uint64_t)input->width * max_dimension + input->height / 2) / input->height);
+    }
+
+    if (out_width == 0)
+        out_width = 1;
+    if (out_height == 0)
+        out_height = 1;
+
+    return resample_rgba_image(input, out_width, out_height);
+}
+
 static int write_chunk(struct buffer *png, const struct z_api *z, const char type[4], const unsigned char *data, uint32_t size)
 {
     unsigned char header[8];
@@ -585,6 +682,23 @@ static int has_suffix(const char *value, const char *suffix)
 static int is_normal_png(const char *name)
 {
     return has_suffix(name, ".png") && strstr(name, "#normal") != NULL;
+}
+
+static int is_atlas_png(const char *path, const char *name)
+{
+    return has_suffix(name, ".png") &&
+           strstr(name, "#normal") == NULL &&
+           strncmp(name, "atlas", 5) == 0 &&
+           strstr(path, "#atlas/") != NULL;
+}
+
+static enum patch_kind patch_kind_for_png(const char *path, const char *name)
+{
+    if (is_normal_png(name))
+        return PATCH_NORMAL_MAP;
+    if (is_atlas_png(path, name))
+        return PATCH_ATLAS;
+    return PATCH_NONE;
 }
 
 static int mips_path_for_png(const char *png_path, char *mips_path, size_t mips_path_size)
@@ -907,12 +1021,14 @@ done:
     return result;
 }
 
-static int process_normal_png(const char *path, const struct z_api *z, uint32_t max_dimension, int *patched_count)
+static int process_texture_png(const char *path, const struct z_api *z, uint32_t normal_max_dimension, uint32_t atlas_max_dimension, enum patch_kind kind, struct patch_counts *counts)
 {
     char mips_path[PATH_MAX];
     struct image input = {0};
     struct image output = {0};
     const struct image *patched_image;
+    uint32_t max_dimension;
+    const char *label;
     int result = -1;
 
     if (decode_png_rgba8(path, z, &input) != 0)
@@ -921,7 +1037,19 @@ static int process_normal_png(const char *path, const struct z_api *z, uint32_t 
         return -1;
     }
 
-    output = downscale_normal_map(&input, max_dimension);
+    if (kind == PATCH_NORMAL_MAP)
+    {
+        max_dimension = normal_max_dimension;
+        label = "normal map";
+        output = downscale_normal_map(&input, max_dimension);
+    }
+    else
+    {
+        max_dimension = atlas_max_dimension;
+        label = "texture atlas";
+        output = downscale_rgba_image(&input, max_dimension);
+    }
+
     if (output.rgba == NULL)
     {
         result = 0;
@@ -947,8 +1075,11 @@ static int process_normal_png(const char *path, const struct z_api *z, uint32_t 
         goto done;
     }
 
-    printf("Downscaled %s from %ux%u to %ux%u\n", path, input.width, input.height, output.width, output.height);
-    (*patched_count)++;
+    printf("Downscaled %s %s from %ux%u to %ux%u\n", label, path, input.width, input.height, output.width, output.height);
+    if (kind == PATCH_NORMAL_MAP)
+        counts->normal_maps++;
+    else
+        counts->atlases++;
     result = 0;
 
 done:
@@ -957,7 +1088,7 @@ done:
     return result;
 }
 
-static int walk_textures(const char *dir_path, const struct z_api *z, uint32_t max_dimension, int *patched_count)
+static int walk_textures(const char *dir_path, const struct z_api *z, uint32_t normal_max_dimension, uint32_t atlas_max_dimension, struct patch_counts *counts)
 {
     DIR *dir = opendir(dir_path);
     struct dirent *entry;
@@ -987,15 +1118,17 @@ static int walk_textures(const char *dir_path, const struct z_api *z, uint32_t m
 
         if (S_ISDIR(st.st_mode))
         {
-            if (walk_textures(child, z, max_dimension, patched_count) != 0)
+            if (walk_textures(child, z, normal_max_dimension, atlas_max_dimension, counts) != 0)
             {
                 closedir(dir);
                 return -1;
             }
         }
-        else if (S_ISREG(st.st_mode) && is_normal_png(entry->d_name))
+        else if (S_ISREG(st.st_mode))
         {
-            if (process_normal_png(child, z, max_dimension, patched_count) != 0)
+            enum patch_kind kind = patch_kind_for_png(child, entry->d_name);
+
+            if (kind != PATCH_NONE && process_texture_png(child, z, normal_max_dimension, atlas_max_dimension, kind, counts) != 0)
             {
                 closedir(dir);
                 return -1;
@@ -1007,10 +1140,10 @@ static int walk_textures(const char *dir_path, const struct z_api *z, uint32_t m
     return 0;
 }
 
-static int patch_normal_map_tree(const char *gamedata_dir, const struct z_api *z, uint32_t max_dimension)
+static int patch_texture_tree(const char *gamedata_dir, const struct z_api *z, uint32_t normal_max_dimension, uint32_t atlas_max_dimension)
 {
     char textures_dir[PATH_MAX];
-    int patched_count = 0;
+    struct patch_counts counts = {0, 0};
 
     if (!path_join(textures_dir, sizeof(textures_dir), gamedata_dir, "data/textures"))
     {
@@ -1018,14 +1151,22 @@ static int patch_normal_map_tree(const char *gamedata_dir, const struct z_api *z
         return -1;
     }
 
-    if (walk_textures(textures_dir, z, max_dimension, &patched_count) != 0)
+    if (walk_textures(textures_dir, z, normal_max_dimension, atlas_max_dimension, &counts) != 0)
     {
-        fprintf(stderr, "Failed to downscale normal maps under %s\n", textures_dir);
+        fprintf(stderr, "Failed to downscale texture assets under %s\n", textures_dir);
         return -1;
     }
 
-    printf("Downscaled %d normal maps to max %u pixels.\n", patched_count, max_dimension);
+    printf("Downscaled %d normal maps to max %u pixels.\n", counts.normal_maps, normal_max_dimension);
+    printf("Downscaled %d texture atlases to max %u pixels.\n", counts.atlases, atlas_max_dimension);
     return 0;
+}
+
+static int is_directory(const char *path)
+{
+    struct stat st;
+
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 static int parse_max_dimension(const char *value, uint32_t *out)
@@ -1048,18 +1189,33 @@ int main(int argc, char **argv)
     struct image input = {0};
     struct image output = {0};
     uint32_t max_dimension;
+    uint32_t atlas_max_dimension;
     int result = 1;
 
-    if (argc != 3 && argc != 4)
+    if (argc != 4)
     {
-        fprintf(stderr, "usage: %s <gamedata-dir> <max-dimension>\n", argv[0]);
+        fprintf(stderr, "usage: %s <gamedata-dir> <normal-map-max-dimension> <atlas-max-dimension>\n", argv[0]);
         fprintf(stderr, "       %s <input.png> <output.png> <max-dimension>\n", argv[0]);
         return 2;
     }
 
-    if (parse_max_dimension(argv[argc - 1], &max_dimension) != 0)
+    if (is_directory(argv[1]))
     {
-        fprintf(stderr, "Invalid max dimension: %s\n", argv[argc - 1]);
+        if (parse_max_dimension(argv[2], &max_dimension) != 0)
+        {
+            fprintf(stderr, "Invalid normal-map max dimension: %s\n", argv[2]);
+            return 2;
+        }
+
+        if (parse_max_dimension(argv[3], &atlas_max_dimension) != 0)
+        {
+            fprintf(stderr, "Invalid atlas max dimension: %s\n", argv[3]);
+            return 2;
+        }
+    }
+    else if (parse_max_dimension(argv[3], &max_dimension) != 0)
+    {
+        fprintf(stderr, "Invalid max dimension: %s\n", argv[3]);
         return 2;
     }
 
@@ -1069,9 +1225,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (argc == 3)
+    if (is_directory(argv[1]))
     {
-        result = patch_normal_map_tree(argv[1], &z, max_dimension) == 0 ? 0 : 1;
+        result = patch_texture_tree(argv[1], &z, max_dimension, atlas_max_dimension) == 0 ? 0 : 1;
         goto done;
     }
 
@@ -1081,7 +1237,7 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    output = downscale_normal_map(&input, max_dimension);
+    output = strstr(argv[1], "#normal") != NULL ? downscale_normal_map(&input, max_dimension) : downscale_rgba_image(&input, max_dimension);
     if (output.rgba == NULL)
     {
         result = copy_file(argv[1], argv[2]);

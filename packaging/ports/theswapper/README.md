@@ -14,7 +14,7 @@ mainSettings.ini
 data/
 ```
 
-On first launch, the PortMaster setup screen validates the files and prepares the local configuration. The retail game assets are not modified.
+On first launch, the PortMaster setup screen validates the files, prepares the local configuration, and optimizes selected texture assets in your local `gamedata` copy.
 
 ## Controls
 
