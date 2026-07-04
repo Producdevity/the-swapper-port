@@ -37,7 +37,7 @@ run_setup() {
 
   export PATCHER_FILE="$GAMEDIR/tools/setup"
   export PATCHER_GAME="The Swapper"
-  export PATCHER_TIME="a few seconds"
+  export PATCHER_TIME="a few minutes"
 
   chmod +x "$PATCHER_FILE"
   # shellcheck source=/dev/null
