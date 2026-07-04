@@ -713,6 +713,186 @@ static int mips_path_for_png(const char *png_path, char *mips_path, size_t mips_
     return 0;
 }
 
+static int atlas_info_path_for_png(const char *png_path, char *atlas_info_path, size_t atlas_info_path_size)
+{
+    const char *slash = strrchr(png_path, '/');
+    size_t dir_len;
+
+    if (slash == NULL)
+        return -1;
+
+    dir_len = (size_t)(slash - png_path);
+    if (dir_len + strlen("/AtlasInfo.ats") + 1 > atlas_info_path_size)
+        return -1;
+
+    memcpy(atlas_info_path, png_path, dir_len);
+    memcpy(atlas_info_path + dir_len, "/AtlasInfo.ats", strlen("/AtlasInfo.ats") + 1);
+    return 0;
+}
+
+static int atlas_index_from_png_name(const char *png_path, int *atlas_index)
+{
+    const char *name = strrchr(png_path, '/');
+    char *end = NULL;
+    long parsed;
+
+    name = name == NULL ? png_path : name + 1;
+    if (strncmp(name, "atlas", 5) != 0)
+        return -1;
+
+    errno = 0;
+    parsed = strtol(name + 5, &end, 10);
+    if (errno != 0 || end == name + 5 || strcmp(end, ".png") != 0 || parsed < 0 || parsed > INT_MAX)
+        return -1;
+
+    *atlas_index = (int)parsed;
+    return 0;
+}
+
+static int append_scaled_int_token(struct buffer *out, const char *token, uint32_t in_size, uint32_t out_size)
+{
+    char scaled[32];
+    char *end = NULL;
+    long value;
+    long output;
+    int written;
+
+    errno = 0;
+    value = strtol(token, &end, 10);
+    if (errno != 0 || end == token || *end != '\0')
+        return buffer_append(out, token, strlen(token));
+
+    output = (long)(((int64_t)value * out_size + (int64_t)in_size / 2) / in_size);
+    written = snprintf(scaled, sizeof(scaled), "%ld", output);
+    if (written <= 0 || (size_t)written >= sizeof(scaled))
+        return -1;
+
+    return buffer_append(out, scaled, (size_t)written);
+}
+
+static int update_atlas_info(const char *png_path, uint32_t in_width, uint32_t in_height, uint32_t out_width, uint32_t out_height)
+{
+    static const char marker[] = "TextureAtlasInfo ";
+    char atlas_info_path[PATH_MAX] = {0};
+    char temp_path[PATH_MAX] = {0};
+    struct buffer input = {0};
+    struct buffer output = {0};
+    char *text = NULL;
+    char *token_data = NULL;
+    char *marker_pos;
+    char *tokens_start;
+    char *tokens_end;
+    char *saveptr = NULL;
+    char *token;
+    FILE *file = NULL;
+    int atlas_index;
+    int token_index = 0;
+    int current_atlas = -1;
+    int result = -1;
+
+    if (atlas_info_path_for_png(png_path, atlas_info_path, sizeof(atlas_info_path)) != 0 ||
+        atlas_index_from_png_name(png_path, &atlas_index) != 0)
+    {
+        return -1;
+    }
+
+    if (read_file(atlas_info_path, &input) != 0)
+        return -1;
+
+    text = malloc(input.size + 1);
+    if (text == NULL)
+        goto done;
+
+    memcpy(text, input.data, input.size);
+    text[input.size] = '\0';
+
+    marker_pos = strstr(text, marker);
+    if (marker_pos == NULL)
+        goto done;
+
+    tokens_start = marker_pos + strlen(marker);
+    tokens_end = strpbrk(tokens_start, "\r\n");
+    if (tokens_end == NULL)
+        tokens_end = text + input.size;
+
+    token_data = malloc((size_t)(tokens_end - tokens_start) + 1);
+    if (token_data == NULL)
+        goto done;
+
+    memcpy(token_data, tokens_start, (size_t)(tokens_end - tokens_start));
+    token_data[tokens_end - tokens_start] = '\0';
+
+    if (buffer_append(&output, text, (size_t)(tokens_start - text)) != 0)
+        goto done;
+
+    token = strtok_r(token_data, "|", &saveptr);
+    while (token != NULL)
+    {
+        int field;
+
+        if (token_index != 0 && buffer_append(&output, "|", 1) != 0)
+            goto done;
+
+        field = token_index == 0 ? -1 : (token_index - 1) % 12;
+        if (field == 0)
+            current_atlas = -1;
+        else if (field == 1)
+            current_atlas = atoi(token);
+
+        if (current_atlas == atlas_index && field >= 2 && field <= 5)
+        {
+            uint32_t in_size = (field == 2 || field == 4) ? in_width : in_height;
+            uint32_t out_size = (field == 2 || field == 4) ? out_width : out_height;
+
+            if (append_scaled_int_token(&output, token, in_size, out_size) != 0)
+                goto done;
+        }
+        else if (buffer_append(&output, token, strlen(token)) != 0)
+        {
+            goto done;
+        }
+
+        token_index++;
+        token = strtok_r(NULL, "|", &saveptr);
+    }
+
+    if (buffer_append(&output, tokens_end, (size_t)((text + input.size) - tokens_end)) != 0)
+        goto done;
+
+    if (snprintf(temp_path, sizeof(temp_path), "%s.tmp.%ld", atlas_info_path, (long)getpid()) >= (int)sizeof(temp_path))
+        goto done;
+
+    file = fopen(temp_path, "wb");
+    if (file == NULL)
+        goto done;
+
+    if (fwrite(output.data, 1, output.size, file) != output.size)
+        goto done;
+
+    if (fclose(file) != 0)
+    {
+        file = NULL;
+        goto done;
+    }
+    file = NULL;
+
+    if (rename(temp_path, atlas_info_path) != 0)
+        goto done;
+
+    result = 0;
+
+done:
+    if (file != NULL)
+        fclose(file);
+    if (result != 0 && atlas_info_path[0] != '\0' && temp_path[0] != '\0')
+        unlink(temp_path);
+    free(text);
+    free(token_data);
+    buffer_free(&input);
+    buffer_free(&output);
+    return result;
+}
+
 static int clamp_int(int value, int min_value, int max_value)
 {
     if (value < min_value)
@@ -1072,6 +1252,12 @@ static int process_texture_png(const char *path, const struct z_api *z, uint32_t
     if (write_mips_file(mips_path, patched_image) != 0)
     {
         fprintf(stderr, "Failed to write downscaled mip chain: %s\n", mips_path);
+        goto done;
+    }
+
+    if (kind == PATCH_ATLAS && update_atlas_info(path, input.width, input.height, output.width, output.height) != 0)
+    {
+        fprintf(stderr, "Failed to update atlas metadata: %s\n", path);
         goto done;
     }
 
