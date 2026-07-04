@@ -69,23 +69,33 @@ Deploy to a Knulli device:
 scripts/deploy-knulli.sh <ssh-host>
 ```
 
+Deploy to a dArkOS device:
+
+```bash
+scripts/deploy-darkos.sh <ssh-host>
+```
+
 To test the same install path users will use, copy the zip into PortMaster's
 autoinstall folder:
 
 ```bash
 scripts/deploy-muos.sh --autoinstall <ssh-host>
 scripts/deploy-knulli.sh --autoinstall <ssh-host>
+scripts/deploy-darkos.sh --autoinstall <ssh-host>
 ```
 
 Then open PortMaster on the device. PortMaster will install the zip and update
 the frontend metadata.
 
-Both deploy scripts use the standard single-card PortMaster paths by default.
-The Knulli helper also accepts explicit directories for custom layouts:
+The deploy scripts use the standard single-card PortMaster paths by default.
+The Knulli and dArkOS helpers also accept explicit directories for custom
+layouts:
 
 ```bash
 scripts/deploy-knulli.sh --ports-dir /userdata/roms/ports <ssh-host>
 scripts/deploy-knulli.sh --autoinstall-dir /userdata/system/.local/share/PortMaster/autoinstall <ssh-host>
+scripts/deploy-darkos.sh --ports-dir /roms/ports <ssh-host>
+scripts/deploy-darkos.sh --autoinstall-dir /roms/tools/PortMaster/autoinstall <ssh-host>
 ```
 
 The host can also be provided with `SWAPPER_DEPLOY_HOST`.
