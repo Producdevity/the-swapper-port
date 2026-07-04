@@ -57,7 +57,7 @@ package: all
 	cp -R "$(LIB_DIR)/." "$(PORT_DIR)/theswapper/libs.aarch64/"
 	cp -R "$(TOOL_DIR)/." "$(PORT_DIR)/theswapper/tools/"
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
-	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup.bash" \
+	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup" \
 	  "$(PORT_DIR)/theswapper/tools/xdg-open" "$(PORT_DIR)/theswapper/tools/texture-downscale"
 
 zip: package

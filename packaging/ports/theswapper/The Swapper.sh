@@ -35,7 +35,7 @@ run_setup() {
     exit 1
   fi
 
-  export PATCHER_FILE="$GAMEDIR/tools/setup.bash"
+  export PATCHER_FILE="$GAMEDIR/tools/setup"
   export PATCHER_GAME="The Swapper"
   export PATCHER_TIME="a few seconds"
 
@@ -76,7 +76,7 @@ fi
 
 cd "$GAMEDIR" || exit 1
 
-> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
+>"$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
 export HOME="$SAVEDIR"
 export PATH="$GAMEDIR/tools:$MONO_DIR/bin:$PATH"
@@ -97,7 +97,7 @@ fi
 
 PORT_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 
-if [[ "${DEVICE_ARCH}" != "x86_64" && ( -n "${LIBGL_FB:-}" || -n "${LIBGL_ES:-}" ) ]]; then
+if [[ "${DEVICE_ARCH}" != "x86_64" && (-n "${LIBGL_FB:-}" || -n "${LIBGL_ES:-}") ]]; then
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libGL.so.1"
   export SDL_VIDEO_EGL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libEGL.so.1"
 fi
