@@ -364,7 +364,7 @@ FMOD_RESULT FMOD_System_CreateStream(void *system, const char *path, int32_t mod
     (void)mode;
     (void)info;
     trace_call("FMOD_System_CreateStream");
-    FmodSound *created = create_sound(path, 0);
+    FmodSound *created = create_sound(path, 1);
     if (sound != NULL)
         *sound = created != NULL ? created : new_handle();
     return FMOD_OK;
