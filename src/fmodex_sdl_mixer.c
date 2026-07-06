@@ -10,8 +10,7 @@ typedef int32_t FMOD_RESULT;
 #define SOUND_MAGIC 0x53575053u
 #define CHANNEL_MAGIC 0x53575043u
 
-typedef struct FmodSound
-{
+typedef struct FmodSound {
     uint32_t magic;
     void *chunk;
     void *music;
@@ -21,8 +20,7 @@ typedef struct FmodSound
     char path[1024];
 } FmodSound;
 
-typedef struct FmodChannel
-{
+typedef struct FmodChannel {
     uint32_t magic;
     int mixer_channel;
     int music_channel;
@@ -74,47 +72,40 @@ static Mix_PlayingFn p_Mix_Playing;
 static Mix_FreeChunkFn p_Mix_FreeChunk;
 static FmodChannel *active_music_channel;
 
-static void *new_handle(void)
-{
+static void *new_handle(void) {
     next_handle += 0x10;
     return (void *)next_handle;
 }
 
-static void trace_call(const char *name)
-{
+static void trace_call(const char *name) {
     const char *enabled = getenv("SWAPPER_TRACE_NATIVE");
     if (enabled == NULL || strcmp(enabled, "1") != 0)
         return;
 
     FILE *file = fopen("fmodex-trace.log", "a");
-    if (file != NULL)
-    {
+    if (file != NULL) {
         fprintf(file, "%s\n", name);
         fclose(file);
     }
 }
 
-static void trace_value(const char *name, const char *value)
-{
+static void trace_value(const char *name, const char *value) {
     const char *enabled = getenv("SWAPPER_TRACE_NATIVE");
     if (enabled == NULL || strcmp(enabled, "1") != 0)
         return;
 
     FILE *file = fopen("fmodex-trace.log", "a");
-    if (file != NULL)
-    {
+    if (file != NULL) {
         fprintf(file, "%s\t%s\n", name, value != NULL ? value : "");
         fclose(file);
     }
 }
 
-static void *load_symbol(void *library, const char *name)
-{
+static void *load_symbol(void *library, const char *name) {
     return library != NULL ? dlsym(library, name) : NULL;
 }
 
-static int init_audio(void)
-{
+static int init_audio(void) {
     if (audio_loaded)
         return audio_ready;
 
@@ -143,7 +134,8 @@ static int init_audio(void)
     p_Mix_Playing = (Mix_PlayingFn)load_symbol(mixer, "Mix_Playing");
     p_Mix_FreeChunk = (Mix_FreeChunkFn)load_symbol(mixer, "Mix_FreeChunk");
 
-    if (p_SDL_RWFromFile == NULL || p_Mix_OpenAudio == NULL || p_Mix_LoadWAV_RW == NULL || p_Mix_PlayChannelTimed == NULL)
+    if (p_SDL_RWFromFile == NULL || p_Mix_OpenAudio == NULL || p_Mix_LoadWAV_RW == NULL ||
+        p_Mix_PlayChannelTimed == NULL)
         return 0;
 
     if (p_Mix_OpenAudio(44100, 0x8010, 2, 1024) != 0)
@@ -156,47 +148,37 @@ static int init_audio(void)
     return 1;
 }
 
-static FmodSound *as_sound(void *handle)
-{
+static FmodSound *as_sound(void *handle) {
     FmodSound *sound = (FmodSound *)handle;
     return sound != NULL && sound->magic == SOUND_MAGIC ? sound : NULL;
 }
 
-static FmodChannel *as_channel(void *handle)
-{
+static FmodChannel *as_channel(void *handle) {
     FmodChannel *channel = (FmodChannel *)handle;
     return channel != NULL && channel->magic == CHANNEL_MAGIC ? channel : NULL;
 }
 
-static int has_audio_extension(const char *path)
-{
-    return path != NULL && (
-        strstr(path, ".ogg") != NULL ||
-        strstr(path, ".wav") != NULL ||
-        strstr(path, ".OGG") != NULL ||
-        strstr(path, ".WAV") != NULL);
+static int has_audio_extension(const char *path) {
+    return path != NULL && (strstr(path, ".ogg") != NULL || strstr(path, ".wav") != NULL ||
+                            strstr(path, ".OGG") != NULL || strstr(path, ".WAV") != NULL);
 }
 
-static void clear_guid(void *guid)
-{
+static void clear_guid(void *guid) {
     if (guid != NULL)
         memset(guid, 0, 16);
 }
 
-static void clear_string(char *buffer, int32_t length)
-{
+static void clear_string(char *buffer, int32_t length) {
     if (buffer != NULL && length > 0)
         buffer[0] = '\0';
 }
 
-static void clear_wide_string(char *buffer, int32_t length)
-{
+static void clear_wide_string(char *buffer, int32_t length) {
     if (buffer != NULL && length > 0)
         ((uint16_t *)buffer)[0] = 0;
 }
 
-static FmodSound *create_sound(const char *path, int requested_stream)
-{
+static FmodSound *create_sound(const char *path, int requested_stream) {
     FmodSound *sound = calloc(1, sizeof(*sound));
     if (sound == NULL)
         return NULL;
@@ -206,8 +188,7 @@ static FmodSound *create_sound(const char *path, int requested_stream)
     sound->loop_count = 0;
     sound->stream = requested_stream ? 1 : 0;
 
-    if (has_audio_extension(path))
-    {
+    if (has_audio_extension(path)) {
         strncpy(sound->path, path, sizeof(sound->path) - 1);
         trace_value("FMOD_LoadPath", sound->path);
     }
@@ -215,8 +196,7 @@ static FmodSound *create_sound(const char *path, int requested_stream)
     return sound;
 }
 
-static int load_sound(FmodSound *sound)
-{
+static int load_sound(FmodSound *sound) {
     if (sound == NULL)
         return 0;
     if (sound->chunk != NULL)
@@ -232,8 +212,7 @@ static int load_sound(FmodSound *sound)
     return sound->chunk != NULL;
 }
 
-static int load_music(FmodSound *sound)
-{
+static int load_music(FmodSound *sound) {
     if (sound == NULL)
         return 0;
     if (sound->music != NULL)
@@ -245,8 +224,7 @@ static int load_music(FmodSound *sound)
     return sound->music != NULL;
 }
 
-static FmodChannel *play_chunk_sound(FmodSound *sound, int paused)
-{
+static FmodChannel *play_chunk_sound(FmodSound *sound, int paused) {
     FmodChannel *channel = calloc(1, sizeof(*channel));
     if (channel == NULL)
         return NULL;
@@ -256,11 +234,9 @@ static FmodChannel *play_chunk_sound(FmodSound *sound, int paused)
     channel->music_channel = 0;
     channel->sound = sound;
 
-    if (load_sound(sound))
-    {
+    if (load_sound(sound)) {
         channel->mixer_channel = p_Mix_PlayChannelTimed(-1, sound->chunk, sound->loop_count, -1);
-        if (channel->mixer_channel >= 0 && p_Mix_Volume != NULL)
-        {
+        if (channel->mixer_channel >= 0 && p_Mix_Volume != NULL) {
             int volume = (int)(sound->volume * 128.0f);
             if (volume < 0)
                 volume = 0;
@@ -275,8 +251,7 @@ static FmodChannel *play_chunk_sound(FmodSound *sound, int paused)
     return channel;
 }
 
-static FmodChannel *play_music_sound(FmodSound *sound, int paused)
-{
+static FmodChannel *play_music_sound(FmodSound *sound, int paused) {
     if (!load_music(sound) || p_Mix_PlayMusic == NULL)
         return NULL;
 
@@ -292,16 +267,14 @@ static FmodChannel *play_music_sound(FmodSound *sound, int paused)
     if (p_Mix_HaltMusic != NULL)
         p_Mix_HaltMusic();
 
-    if (p_Mix_PlayMusic(sound->music, sound->loop_count) != 0)
-    {
+    if (p_Mix_PlayMusic(sound->music, sound->loop_count) != 0) {
         free(channel);
         return NULL;
     }
 
     active_music_channel = channel;
 
-    if (p_Mix_VolumeMusic != NULL)
-    {
+    if (p_Mix_VolumeMusic != NULL) {
         int volume = (int)(sound->volume * 128.0f);
         if (volume < 0)
             volume = 0;
@@ -316,10 +289,8 @@ static FmodChannel *play_music_sound(FmodSound *sound, int paused)
     return channel;
 }
 
-static FmodChannel *play_sound(FmodSound *sound, int paused)
-{
-    if (sound != NULL && sound->stream)
-    {
+static FmodChannel *play_sound(FmodSound *sound, int paused) {
+    if (sound != NULL && sound->stream) {
         FmodChannel *stream = play_music_sound(sound, paused);
         if (stream != NULL)
             return stream;
@@ -328,16 +299,15 @@ static FmodChannel *play_sound(FmodSound *sound, int paused)
     return play_chunk_sound(sound, paused);
 }
 
-FMOD_RESULT FMOD_System_Create(void **system)
-{
+FMOD_RESULT FMOD_System_Create(void **system) {
     trace_call("FMOD_System_Create");
     if (system != NULL)
         *system = new_handle();
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_Init(void *system, int32_t max_channels, int32_t flags, void *extra_driver_data)
-{
+FMOD_RESULT FMOD_System_Init(void *system, int32_t max_channels, int32_t flags,
+                             void *extra_driver_data) {
     (void)system;
     (void)max_channels;
     (void)flags;
@@ -346,8 +316,8 @@ FMOD_RESULT FMOD_System_Init(void *system, int32_t max_channels, int32_t flags, 
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_CreateSound(void *system, const char *path, int32_t mode, void *info, void **sound)
-{
+FMOD_RESULT FMOD_System_CreateSound(void *system, const char *path, int32_t mode, void *info,
+                                    void **sound) {
     (void)system;
     (void)mode;
     (void)info;
@@ -358,8 +328,8 @@ FMOD_RESULT FMOD_System_CreateSound(void *system, const char *path, int32_t mode
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_CreateStream(void *system, const char *path, int32_t mode, void *info, void **sound)
-{
+FMOD_RESULT FMOD_System_CreateStream(void *system, const char *path, int32_t mode, void *info,
+                                     void **sound) {
     (void)system;
     (void)mode;
     (void)info;
@@ -370,8 +340,8 @@ FMOD_RESULT FMOD_System_CreateStream(void *system, const char *path, int32_t mod
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_PlaySound(void *system, int32_t channel_id, void *sound_handle, int32_t paused, void **channel)
-{
+FMOD_RESULT FMOD_System_PlaySound(void *system, int32_t channel_id, void *sound_handle,
+                                  int32_t paused, void **channel) {
     (void)system;
     (void)channel_id;
     trace_call("FMOD_System_PlaySound");
@@ -381,8 +351,7 @@ FMOD_RESULT FMOD_System_PlaySound(void *system, int32_t channel_id, void *sound_
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_CreateChannelGroup(void *system, const char *name, void **group)
-{
+FMOD_RESULT FMOD_System_CreateChannelGroup(void *system, const char *name, void **group) {
     (void)system;
     (void)name;
     trace_call("FMOD_System_CreateChannelGroup");
@@ -391,8 +360,7 @@ FMOD_RESULT FMOD_System_CreateChannelGroup(void *system, const char *name, void 
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_CreateDSP(void *system, void *description, void **dsp)
-{
+FMOD_RESULT FMOD_System_CreateDSP(void *system, void *description, void **dsp) {
     (void)system;
     (void)description;
     trace_call("FMOD_System_CreateDSP");
@@ -401,8 +369,7 @@ FMOD_RESULT FMOD_System_CreateDSP(void *system, void *description, void **dsp)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_CreateDSPByPlugin(void *system, uint32_t plugin_handle, void **dsp)
-{
+FMOD_RESULT FMOD_System_CreateDSPByPlugin(void *system, uint32_t plugin_handle, void **dsp) {
     (void)system;
     (void)plugin_handle;
     trace_call("FMOD_System_CreateDSPByPlugin");
@@ -411,8 +378,7 @@ FMOD_RESULT FMOD_System_CreateDSPByPlugin(void *system, uint32_t plugin_handle, 
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_CreateDSPByType(void *system, int32_t dsp_type, void **dsp)
-{
+FMOD_RESULT FMOD_System_CreateDSPByType(void *system, int32_t dsp_type, void **dsp) {
     (void)system;
     (void)dsp_type;
     trace_call("FMOD_System_CreateDSPByType");
@@ -421,23 +387,21 @@ FMOD_RESULT FMOD_System_CreateDSPByType(void *system, int32_t dsp_type, void **d
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Sound_SetDefaults(void *sound_handle, float frequency, float volume, float pan, int32_t priority)
-{
+FMOD_RESULT FMOD_Sound_SetDefaults(void *sound_handle, float frequency, float volume, float pan,
+                                   int32_t priority) {
     (void)frequency;
     (void)pan;
     (void)priority;
     trace_call("FMOD_Sound_SetDefaults");
     FmodSound *sound = as_sound(sound_handle);
-    if (sound != NULL)
-    {
+    if (sound != NULL) {
         sound->volume = volume;
         return FMOD_OK;
     }
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Sound_SetLoopCount(void *sound_handle, int32_t count)
-{
+FMOD_RESULT FMOD_Sound_SetLoopCount(void *sound_handle, int32_t count) {
     trace_call("FMOD_Sound_SetLoopCount");
     FmodSound *sound = as_sound(sound_handle);
     if (sound != NULL)
@@ -445,8 +409,7 @@ FMOD_RESULT FMOD_Sound_SetLoopCount(void *sound_handle, int32_t count)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Sound_Release(void *sound_handle)
-{
+FMOD_RESULT FMOD_Sound_Release(void *sound_handle) {
     trace_call("FMOD_Sound_Release");
     FmodSound *sound = as_sound(sound_handle);
     if (sound == NULL)
@@ -454,10 +417,9 @@ FMOD_RESULT FMOD_Sound_Release(void *sound_handle)
 
     if (sound->chunk != NULL && p_Mix_FreeChunk != NULL)
         p_Mix_FreeChunk(sound->chunk);
-    if (sound->music != NULL && p_Mix_FreeMusic != NULL)
-    {
-        if (active_music_channel != NULL && active_music_channel->sound == sound && p_Mix_HaltMusic != NULL)
-        {
+    if (sound->music != NULL && p_Mix_FreeMusic != NULL) {
+        if (active_music_channel != NULL && active_music_channel->sound == sound &&
+            p_Mix_HaltMusic != NULL) {
             p_Mix_HaltMusic();
             active_music_channel = NULL;
         }
@@ -468,12 +430,10 @@ FMOD_RESULT FMOD_Sound_Release(void *sound_handle)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume)
-{
+FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume) {
     trace_call("FMOD_Channel_SetVolume");
     FmodChannel *channel = as_channel(channel_handle);
-    if (channel != NULL && channel->music_channel && p_Mix_VolumeMusic != NULL)
-    {
+    if (channel != NULL && channel->music_channel && p_Mix_VolumeMusic != NULL) {
         int mixer_volume = (int)(volume * 128.0f);
         if (mixer_volume < 0)
             mixer_volume = 0;
@@ -483,8 +443,7 @@ FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume)
         return FMOD_OK;
     }
 
-    if (channel != NULL && channel->mixer_channel >= 0 && p_Mix_Volume != NULL)
-    {
+    if (channel != NULL && channel->mixer_channel >= 0 && p_Mix_Volume != NULL) {
         int mixer_volume = (int)(volume * 128.0f);
         if (mixer_volume < 0)
             mixer_volume = 0;
@@ -495,12 +454,10 @@ FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused)
-{
+FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused) {
     trace_call("FMOD_Channel_SetPaused");
     FmodChannel *channel = as_channel(channel_handle);
-    if (channel != NULL && channel->music_channel)
-    {
+    if (channel != NULL && channel->music_channel) {
         if (paused && p_Mix_PauseMusic != NULL)
             p_Mix_PauseMusic();
         else if (!paused && p_Mix_ResumeMusic != NULL)
@@ -508,8 +465,7 @@ FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused)
         return FMOD_OK;
     }
 
-    if (channel != NULL && channel->mixer_channel >= 0)
-    {
+    if (channel != NULL && channel->mixer_channel >= 0) {
         if (paused && p_Mix_Pause != NULL)
             p_Mix_Pause(channel->mixer_channel);
         else if (!paused && p_Mix_Resume != NULL)
@@ -518,33 +474,27 @@ FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Channel_IsPlaying(void *channel_handle, int32_t *playing)
-{
+FMOD_RESULT FMOD_Channel_IsPlaying(void *channel_handle, int32_t *playing) {
     trace_call("FMOD_Channel_IsPlaying");
     FmodChannel *channel = as_channel(channel_handle);
-    if (playing != NULL)
-    {
-        if (channel != NULL && channel->music_channel && p_Mix_PlayingMusic != NULL)
-        {
+    if (playing != NULL) {
+        if (channel != NULL && channel->music_channel && p_Mix_PlayingMusic != NULL) {
             *playing = active_music_channel == channel ? p_Mix_PlayingMusic() : 0;
             return FMOD_OK;
         }
 
         *playing = channel != NULL && channel->mixer_channel >= 0 && p_Mix_Playing != NULL
-            ? p_Mix_Playing(channel->mixer_channel)
-            : 0;
+                       ? p_Mix_Playing(channel->mixer_channel)
+                       : 0;
     }
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_Channel_Stop(void *channel_handle)
-{
+FMOD_RESULT FMOD_Channel_Stop(void *channel_handle) {
     trace_call("FMOD_Channel_Stop");
     FmodChannel *channel = as_channel(channel_handle);
-    if (channel != NULL && channel->music_channel)
-    {
-        if (active_music_channel == channel)
-        {
+    if (channel != NULL && channel->music_channel) {
+        if (active_music_channel == channel) {
             if (p_Mix_HaltMusic != NULL)
                 p_Mix_HaltMusic();
             active_music_channel = NULL;
@@ -557,8 +507,7 @@ FMOD_RESULT FMOD_Channel_Stop(void *channel_handle)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetVersion(void *system, uint32_t *version)
-{
+FMOD_RESULT FMOD_System_GetVersion(void *system, uint32_t *version) {
     (void)system;
     trace_call("FMOD_System_GetVersion");
     if (version != NULL)
@@ -566,8 +515,8 @@ FMOD_RESULT FMOD_System_GetVersion(void *system, uint32_t *version)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDSPBufferSize(void *system, uint32_t *buffer_length, int32_t *num_buffers)
-{
+FMOD_RESULT FMOD_System_GetDSPBufferSize(void *system, uint32_t *buffer_length,
+                                         int32_t *num_buffers) {
     (void)system;
     trace_call("FMOD_System_GetDSPBufferSize");
     if (buffer_length != NULL)
@@ -577,8 +526,7 @@ FMOD_RESULT FMOD_System_GetDSPBufferSize(void *system, uint32_t *buffer_length, 
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDSPClock(void *system, uint32_t *hi, uint32_t *lo)
-{
+FMOD_RESULT FMOD_System_GetDSPClock(void *system, uint32_t *hi, uint32_t *lo) {
     (void)system;
     trace_call("FMOD_System_GetDSPClock");
     if (hi != NULL)
@@ -588,8 +536,7 @@ FMOD_RESULT FMOD_System_GetDSPClock(void *system, uint32_t *hi, uint32_t *lo)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDSPHead(void *system, void **dsp)
-{
+FMOD_RESULT FMOD_System_GetDSPHead(void *system, void **dsp) {
     (void)system;
     trace_call("FMOD_System_GetDSPHead");
     if (dsp != NULL)
@@ -597,8 +544,7 @@ FMOD_RESULT FMOD_System_GetDSPHead(void *system, void **dsp)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDriver(void *system, int32_t *driver)
-{
+FMOD_RESULT FMOD_System_GetDriver(void *system, int32_t *driver) {
     (void)system;
     trace_call("FMOD_System_GetDriver");
     if (driver != NULL)
@@ -606,9 +552,8 @@ FMOD_RESULT FMOD_System_GetDriver(void *system, int32_t *driver)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDriverCaps(
-    void *system, int32_t id, int32_t *caps, int32_t *min_frequency, int32_t *max_frequency)
-{
+FMOD_RESULT FMOD_System_GetDriverCaps(void *system, int32_t id, int32_t *caps,
+                                      int32_t *min_frequency, int32_t *max_frequency) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetDriverCaps");
@@ -621,9 +566,8 @@ FMOD_RESULT FMOD_System_GetDriverCaps(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDriverInfo(
-    void *system, int32_t id, char *name, int32_t name_length, void *guid)
-{
+FMOD_RESULT FMOD_System_GetDriverInfo(void *system, int32_t id, char *name, int32_t name_length,
+                                      void *guid) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetDriverInfo");
@@ -632,9 +576,8 @@ FMOD_RESULT FMOD_System_GetDriverInfo(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetDriverInfoW(
-    void *system, int32_t id, char *name, int32_t name_length, void *guid)
-{
+FMOD_RESULT FMOD_System_GetDriverInfoW(void *system, int32_t id, char *name, int32_t name_length,
+                                       void *guid) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetDriverInfoW");
@@ -643,8 +586,7 @@ FMOD_RESULT FMOD_System_GetDriverInfoW(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetFileBufferSize(void *system, int32_t *file_buffer_size)
-{
+FMOD_RESULT FMOD_System_GetFileBufferSize(void *system, int32_t *file_buffer_size) {
     (void)system;
     trace_call("FMOD_System_GetFileBufferSize");
     if (file_buffer_size != NULL)
@@ -652,8 +594,7 @@ FMOD_RESULT FMOD_System_GetFileBufferSize(void *system, int32_t *file_buffer_siz
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetGeometrySettings(void *system, float *max_world_size)
-{
+FMOD_RESULT FMOD_System_GetGeometrySettings(void *system, float *max_world_size) {
     (void)system;
     trace_call("FMOD_System_GetGeometrySettings");
     if (max_world_size != NULL)
@@ -661,8 +602,7 @@ FMOD_RESULT FMOD_System_GetGeometrySettings(void *system, float *max_world_size)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetNumDrivers(void *system, int32_t *num_drivers)
-{
+FMOD_RESULT FMOD_System_GetNumDrivers(void *system, int32_t *num_drivers) {
     (void)system;
     trace_call("FMOD_System_GetNumDrivers");
     if (num_drivers != NULL)
@@ -670,9 +610,8 @@ FMOD_RESULT FMOD_System_GetNumDrivers(void *system, int32_t *num_drivers)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetRecordDriverCaps(
-    void *system, int32_t id, int32_t *caps, int32_t *min_frequency, int32_t *max_frequency)
-{
+FMOD_RESULT FMOD_System_GetRecordDriverCaps(void *system, int32_t id, int32_t *caps,
+                                            int32_t *min_frequency, int32_t *max_frequency) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetRecordDriverCaps");
@@ -685,9 +624,8 @@ FMOD_RESULT FMOD_System_GetRecordDriverCaps(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetRecordDriverInfo(
-    void *system, int32_t id, char *name, int32_t name_length, void *guid)
-{
+FMOD_RESULT FMOD_System_GetRecordDriverInfo(void *system, int32_t id, char *name,
+                                            int32_t name_length, void *guid) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetRecordDriverInfo");
@@ -696,9 +634,8 @@ FMOD_RESULT FMOD_System_GetRecordDriverInfo(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetRecordDriverInfoW(
-    void *system, int32_t id, char *name, int32_t name_length, void *guid)
-{
+FMOD_RESULT FMOD_System_GetRecordDriverInfoW(void *system, int32_t id, char *name,
+                                             int32_t name_length, void *guid) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetRecordDriverInfoW");
@@ -707,8 +644,7 @@ FMOD_RESULT FMOD_System_GetRecordDriverInfoW(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetRecordNumDrivers(void *system, int32_t *num_drivers)
-{
+FMOD_RESULT FMOD_System_GetRecordNumDrivers(void *system, int32_t *num_drivers) {
     (void)system;
     trace_call("FMOD_System_GetRecordNumDrivers");
     if (num_drivers != NULL)
@@ -716,8 +652,7 @@ FMOD_RESULT FMOD_System_GetRecordNumDrivers(void *system, int32_t *num_drivers)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetRecordPosition(void *system, int32_t id, uint32_t *position)
-{
+FMOD_RESULT FMOD_System_GetRecordPosition(void *system, int32_t id, uint32_t *position) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_GetRecordPosition");
@@ -726,9 +661,8 @@ FMOD_RESULT FMOD_System_GetRecordPosition(void *system, int32_t id, uint32_t *po
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetSoundRAM(
-    void *system, int32_t *current_alloced, int32_t *max_alloced, int32_t *total)
-{
+FMOD_RESULT FMOD_System_GetSoundRAM(void *system, int32_t *current_alloced, int32_t *max_alloced,
+                                    int32_t *total) {
     (void)system;
     trace_call("FMOD_System_GetSoundRAM");
     if (current_alloced != NULL)
@@ -740,15 +674,9 @@ FMOD_RESULT FMOD_System_GetSoundRAM(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetSoftwareFormat(
-    void *system,
-    int32_t *sample_rate,
-    int32_t *format,
-    int32_t *output_channels,
-    int32_t *max_input_channels,
-    int32_t *resample_method,
-    int32_t *bits)
-{
+FMOD_RESULT FMOD_System_GetSoftwareFormat(void *system, int32_t *sample_rate, int32_t *format,
+                                          int32_t *output_channels, int32_t *max_input_channels,
+                                          int32_t *resample_method, int32_t *bits) {
     (void)system;
     trace_call("FMOD_System_GetSoftwareFormat");
     if (sample_rate != NULL)
@@ -766,8 +694,7 @@ FMOD_RESULT FMOD_System_GetSoftwareFormat(
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_GetSpeakerMode(void *system, int32_t *speaker_mode)
-{
+FMOD_RESULT FMOD_System_GetSpeakerMode(void *system, int32_t *speaker_mode) {
     (void)system;
     trace_call("FMOD_System_GetSpeakerMode");
     if (speaker_mode != NULL)
@@ -775,8 +702,7 @@ FMOD_RESULT FMOD_System_GetSpeakerMode(void *system, int32_t *speaker_mode)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_IsRecording(void *system, int32_t id, int32_t *recording)
-{
+FMOD_RESULT FMOD_System_IsRecording(void *system, int32_t id, int32_t *recording) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_IsRecording");
@@ -785,8 +711,7 @@ FMOD_RESULT FMOD_System_IsRecording(void *system, int32_t id, int32_t *recording
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_RecordStart(void *system, int32_t id, void *sound, int32_t loop)
-{
+FMOD_RESULT FMOD_System_RecordStart(void *system, int32_t id, void *sound, int32_t loop) {
     (void)system;
     (void)id;
     (void)sound;
@@ -795,16 +720,14 @@ FMOD_RESULT FMOD_System_RecordStart(void *system, int32_t id, void *sound, int32
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_RecordStop(void *system, int32_t id)
-{
+FMOD_RESULT FMOD_System_RecordStop(void *system, int32_t id) {
     (void)system;
     (void)id;
     trace_call("FMOD_System_RecordStop");
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_Release(void *system)
-{
+FMOD_RESULT FMOD_System_Release(void *system) {
     (void)system;
     trace_call("FMOD_System_Release");
     if (p_Mix_HaltMusic != NULL)
@@ -813,23 +736,25 @@ FMOD_RESULT FMOD_System_Release(void *system)
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_Set3DRolloffCallback(void *system, void *callback)
-{
+FMOD_RESULT FMOD_System_Set3DRolloffCallback(void *system, void *callback) {
     (void)system;
     (void)callback;
     trace_call("FMOD_System_Set3DRolloffCallback");
     return FMOD_OK;
 }
 
-FMOD_RESULT FMOD_System_SetFileBufferSize(void *system, int32_t file_buffer_size)
-{
+FMOD_RESULT FMOD_System_SetFileBufferSize(void *system, int32_t file_buffer_size) {
     (void)system;
     (void)file_buffer_size;
     trace_call("FMOD_System_SetFileBufferSize");
     return FMOD_OK;
 }
 
-#define FMOD_STUB(name) FMOD_RESULT name() { trace_call(#name); return FMOD_OK; }
+#define FMOD_STUB(name)                                                                            \
+    FMOD_RESULT name() {                                                                           \
+        trace_call(#name);                                                                         \
+        return FMOD_OK;                                                                            \
+    }
 
 FMOD_STUB(FMOD_ChannelGroup_AddDSP)
 FMOD_STUB(FMOD_ChannelGroup_AddGroup)
