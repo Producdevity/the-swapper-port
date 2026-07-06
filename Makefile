@@ -16,9 +16,11 @@ NATIVE_LIBS := \
   $(LIB_DIR)/libwindows_stub.so \
   $(LIB_DIR)/libsteam_api.so \
   $(LIB_DIR)/libsdkencryptedappticket.so \
-  $(LIB_DIR)/libfmodex.so
+  $(LIB_DIR)/libfmodex.so \
+  $(LIB_DIR)/libtexture_astc.so
 
 NATIVE_TOOLS := \
+  $(TOOL_DIR)/texture-astc-manifest \
   $(TOOL_DIR)/texture-downscale
 
 all: $(NATIVE_LIBS) $(NATIVE_TOOLS) aliases
@@ -41,6 +43,12 @@ $(LIB_DIR)/libsdkencryptedappticket.so: src/steam_stub.c | $(LIB_DIR)
 $(LIB_DIR)/libfmodex.so: src/fmodex_sdl_mixer.c | $(LIB_DIR)
 	$(CC) $(CFLAGS) -shared $(LDFLAGS) -o $@ $< -ldl
 
+$(LIB_DIR)/libtexture_astc.so: src/texture_astc_gl.c | $(LIB_DIR)
+	$(CC) $(CFLAGS) -shared $(LDFLAGS) -o $@ $< -ldl
+
+$(TOOL_DIR)/texture-astc-manifest: src/texture_astc_manifest.c | $(TOOL_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
+
 $(TOOL_DIR)/texture-downscale: src/texture_downscale.c | $(TOOL_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
@@ -58,7 +66,9 @@ package: all
 	cp -R "$(TOOL_DIR)/." "$(PORT_DIR)/theswapper/tools/"
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
 	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup" \
-	  "$(PORT_DIR)/theswapper/tools/xdg-open" "$(PORT_DIR)/theswapper/tools/texture-downscale"
+	  "$(PORT_DIR)/theswapper/tools/mem-profile" "$(PORT_DIR)/theswapper/tools/texture-astc-manifest" \
+	  "$(PORT_DIR)/theswapper/tools/texture-downscale" \
+	  "$(PORT_DIR)/theswapper/tools/xdg-open"
 
 zip: package
 	rm -rf "$(RELEASE_DIR)"
