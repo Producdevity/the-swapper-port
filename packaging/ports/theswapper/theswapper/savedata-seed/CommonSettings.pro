@@ -19,13 +19,13 @@ DiffuseQuality 1
 ParticleQuality 1
 IsFilmlookEnabled False
 IsPostFxEnabled False
-PostFxBlurQuality 0
+PostFxBlurQuality 1
 PostFxMotionBlurQuality False
 PostFxBloomQuality 0
 LightShaftQuality 1
-GBufferSampleAntialising 0
+GBufferSampleAntialising 1
 Dithering False
-Vignette 1
+Vignette 0
 HiResEdges False
 IsVsyncEnabled False
 XResolution 640
@@ -33,7 +33,7 @@ YResolution 480
 SmoothSampling False
 Antialising False
 ScreenRefreshRate 60
-ScreenRefreshRateCapEnabled True
+ScreenRefreshRateCapEnabled False
 ScreenRefreshRateCap 60
 DisableCustomMouseSensitivity False
 MouseSpeed 1
