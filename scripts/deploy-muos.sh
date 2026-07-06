@@ -5,6 +5,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 host="${SWAPPER_DEPLOY_HOST:-}"
 autoinstall="${SWAPPER_AUTOINSTALL:-0}"
+reset_profiles="${SWAPPER_RESET_PROFILES:-0}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -12,14 +13,18 @@ while [ "$#" -gt 0 ]; do
       autoinstall=1
       shift
       ;;
+    --reset-profiles)
+      reset_profiles=1
+      shift
+      ;;
     -h|--help)
-      echo "Usage: $0 [--autoinstall] <ssh-host>" >&2
-      echo "Or set SWAPPER_DEPLOY_HOST and optionally SWAPPER_AUTOINSTALL=1." >&2
+      echo "Usage: $0 [--autoinstall] [--reset-profiles] <ssh-host>" >&2
+      echo "Or set SWAPPER_DEPLOY_HOST and optionally SWAPPER_AUTOINSTALL=1 or SWAPPER_RESET_PROFILES=1." >&2
       exit 0
       ;;
     -*)
       echo "Unknown option: $1" >&2
-      echo "Usage: $0 [--autoinstall] <ssh-host>" >&2
+      echo "Usage: $0 [--autoinstall] [--reset-profiles] <ssh-host>" >&2
       exit 2
       ;;
     *)
@@ -34,8 +39,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$host" ]; then
-  echo "Usage: $0 [--autoinstall] <ssh-host>" >&2
-  echo "Or set SWAPPER_DEPLOY_HOST and optionally SWAPPER_AUTOINSTALL=1." >&2
+  echo "Usage: $0 [--autoinstall] [--reset-profiles] <ssh-host>" >&2
+  echo "Or set SWAPPER_DEPLOY_HOST and optionally SWAPPER_AUTOINSTALL=1 or SWAPPER_RESET_PROFILES=1." >&2
   exit 2
 fi
 
@@ -75,7 +80,15 @@ package_root="build/package/ports/theswapper"
 launcher="$package_root/The Swapper.sh"
 payload="$package_root/theswapper"
 
-for required in "$launcher" "$payload/libs.aarch64/libfmodex.so" "$payload/tools/setup" "$payload/tools/texture-downscale" "$payload/tools/xdg-open"; do
+for required in \
+  "$launcher" \
+  "$payload/libs.aarch64/libfmodex.so" \
+  "$payload/libs.aarch64/libtexture_astc.so" \
+  "$payload/tools/setup" \
+  "$payload/tools/mem-profile" \
+  "$payload/tools/texture-astc-manifest" \
+  "$payload/tools/texture-downscale" \
+  "$payload/tools/xdg-open"; do
   if [ ! -e "$required" ]; then
     echo "Missing package file: $required" >&2
     exit 1
@@ -100,6 +113,9 @@ rsync -rt --delete --no-owner --no-group --omit-dir-times \
   --exclude savedata/ \
   --exclude asset-patches/ \
   --exclude .setup_complete \
+  --exclude setup.log \
+  --exclude log.txt \
+  --exclude logs/ \
   "$payload/" "$host:$gamedir/"
 rsync -rt --no-owner --no-group --omit-dir-times \
   "$package_root/README.md" \
@@ -142,12 +158,13 @@ if [ -n "${SWAPPER_GAMEFILES_DIR:-}" ]; then
   rsync -rt --no-owner --no-group --omit-dir-times "$SWAPPER_GAMEFILES_DIR/" "$host:$gamedir/gamedata/"
 fi
 
-ssh "$host" 'sh -s' -- "$gamedir" "$portdir" "$reset_setup" "$remote_root" <<'REMOTE'
+ssh "$host" 'sh -s' -- "$gamedir" "$portdir" "$reset_setup" "$reset_profiles" "$remote_root" <<'REMOTE'
 set -e
 gamedir="$1"
 portdir="$2"
 reset_setup="$3"
-remote_root="$4"
+reset_profiles="$4"
+remote_root="$5"
 catalog_dir="$remote_root/MUOS/info/catalogue/External - Ports"
 
 pids="$(ps w | awk '/[m]ono TheSwapper\.exe/ { print $1 }')"
@@ -160,7 +177,7 @@ mv "$portdir/The Swapper.sh.tmp" "$portdir/The Swapper.sh"
 mv /tmp/theswapper-cover.png.tmp "$catalog_dir/box/The Swapper.png"
 mv /tmp/theswapper-screenshot.png.tmp "$catalog_dir/preview/The Swapper.png"
 mv /tmp/theswapper-description.txt.tmp "$catalog_dir/text/The Swapper.txt"
-chmod 755 "$portdir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
+chmod 755 "$portdir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/mem-profile" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
 
 if [ "$reset_setup" = "1" ]; then
   rm -f \
@@ -170,11 +187,20 @@ if [ "$reset_setup" = "1" ]; then
   rm -rf "$gamedir/asset-patches"
 fi
 
+if [ "$reset_profiles" = "1" ]; then
+  profile_dir="$gamedir/savedata-home/.local/share/Facepalm Games/The Swapper 1000"
+  mkdir -p "$profile_dir"
+  cp -f "$gamedir/savedata-seed/"*.pro "$profile_dir/"
+fi
+
 ls -l "$portdir/The Swapper.sh" \
   "$catalog_dir/box/The Swapper.png" \
   "$catalog_dir/preview/The Swapper.png" \
   "$catalog_dir/text/The Swapper.txt" \
+  "$gamedir/libs.aarch64/libtexture_astc.so" \
   "$gamedir/tools/setup" \
+  "$gamedir/tools/mem-profile" \
+  "$gamedir/tools/texture-astc-manifest" \
   "$gamedir/tools/texture-downscale" \
   "$gamedir/tools/xdg-open" \
   "$gamedir/libs.aarch64/libfmodex.so"

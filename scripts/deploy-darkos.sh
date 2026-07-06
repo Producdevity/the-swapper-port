@@ -14,6 +14,7 @@ Options:
   --autoinstall-dir <path>  Autoinstall directory. Default: <root>/tools/PortMaster/autoinstall
   --gamefiles-dir <path>    Copy unmodified Steam game files into gamedata.
   --reset-setup             Re-run first-launch setup on next launch.
+  --reset-profiles          Overwrite saved .pro files from savedata-seed.
 
 Environment:
   SWAPPER_DEPLOY_HOST
@@ -22,6 +23,7 @@ Environment:
   SWAPPER_DARKOS_AUTOINSTALL_DIR
   SWAPPER_GAMEFILES_DIR
   SWAPPER_RESET_SETUP=1
+  SWAPPER_RESET_PROFILES=1
   SWAPPER_AUTOINSTALL=1
 EOF
 }
@@ -32,6 +34,7 @@ ports_dir="${SWAPPER_DARKOS_PORTS_DIR:-}"
 autoinstall_dir="${SWAPPER_DARKOS_AUTOINSTALL_DIR:-}"
 gamefiles_dir="${SWAPPER_GAMEFILES_DIR:-}"
 reset_setup="${SWAPPER_RESET_SETUP:-0}"
+reset_profiles="${SWAPPER_RESET_PROFILES:-0}"
 autoinstall="${SWAPPER_AUTOINSTALL:-0}"
 
 while [ "$#" -gt 0 ]; do
@@ -62,6 +65,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --reset-setup)
       reset_setup=1
+      shift
+      ;;
+    --reset-profiles)
+      reset_profiles=1
       shift
       ;;
     -h|--help)
@@ -121,7 +128,15 @@ package_root="build/package/ports/theswapper"
 launcher="$package_root/The Swapper.sh"
 payload="$package_root/theswapper"
 
-for required in "$launcher" "$payload/libs.aarch64/libfmodex.so" "$payload/tools/setup" "$payload/tools/texture-downscale" "$payload/tools/xdg-open"; do
+for required in \
+  "$launcher" \
+  "$payload/libs.aarch64/libfmodex.so" \
+  "$payload/libs.aarch64/libtexture_astc.so" \
+  "$payload/tools/setup" \
+  "$payload/tools/mem-profile" \
+  "$payload/tools/texture-astc-manifest" \
+  "$payload/tools/texture-downscale" \
+  "$payload/tools/xdg-open"; do
   if [ ! -e "$required" ]; then
     echo "Missing package file: $required" >&2
     exit 1
@@ -145,6 +160,9 @@ rsync -rt --delete --no-owner --no-group --omit-dir-times \
   --exclude savedata/ \
   --exclude asset-patches/ \
   --exclude .setup_complete \
+  --exclude setup.log \
+  --exclude log.txt \
+  --exclude logs/ \
   "$payload/" "$host:$gamedir/"
 rsync -rt --no-owner --no-group --omit-dir-times \
   "$package_root/README.md" \
@@ -159,11 +177,12 @@ if [ -n "$gamefiles_dir" ]; then
   rsync -rt --no-owner --no-group --omit-dir-times "$gamefiles_dir/" "$host:$gamedir/gamedata/"
 fi
 
-ssh "$host" 'sh -s' -- "$ports_dir" "$gamedir" "$reset_setup" <<'REMOTE'
+ssh "$host" 'sh -s' -- "$ports_dir" "$gamedir" "$reset_setup" "$reset_profiles" <<'REMOTE'
 set -e
 ports_dir="$1"
 gamedir="$2"
 reset_setup="$3"
+reset_profiles="$4"
 
 pids="$(ps w | awk '/[m]ono TheSwapper\.exe/ { print $1 }')"
 [ -n "$pids" ] && kill -TERM $pids 2>/dev/null || true
@@ -172,7 +191,7 @@ pids="$(ps w | awk '/[m]ono TheSwapper\.exe/ { print $1 }')"
 [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true
 
 mv "$ports_dir/The Swapper.sh.tmp" "$ports_dir/The Swapper.sh"
-chmod 755 "$ports_dir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
+chmod 755 "$ports_dir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/mem-profile" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
 
 if [ "$reset_setup" = "1" ]; then
   rm -f \
@@ -182,7 +201,13 @@ if [ "$reset_setup" = "1" ]; then
   rm -rf "$gamedir/asset-patches"
 fi
 
-ls -l "$ports_dir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open" "$gamedir/libs.aarch64/libfmodex.so"
+if [ "$reset_profiles" = "1" ]; then
+  profile_dir="$gamedir/savedata-home/.local/share/Facepalm Games/The Swapper 1000"
+  mkdir -p "$profile_dir"
+  cp -f "$gamedir/savedata-seed/"*.pro "$profile_dir/"
+fi
+
+ls -l "$ports_dir/The Swapper.sh" "$gamedir/libs.aarch64/libfmodex.so" "$gamedir/libs.aarch64/libtexture_astc.so" "$gamedir/tools/setup" "$gamedir/tools/mem-profile" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
 
 if [ ! -f "$gamedir/gamedata/TheSwapper.exe" ]; then
   echo "Note: copy the Steam Windows files into $gamedir/gamedata before launching." >&2
