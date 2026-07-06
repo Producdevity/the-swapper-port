@@ -1,0 +1,176 @@
+#!/bin/sh
+set -eu
+
+pid="$1"
+out_dir="$2"
+interval="${3:-1}"
+
+mkdir -p "$out_dir"
+
+summary_file="$out_dir/summary.csv"
+maps_file="$out_dir/maps.tsv"
+snapshots_dir="$out_dir/snapshots"
+
+printf 'timestamp,elapsed_s,pid,vmsize_kb,vmrss_kb,vmdata_kb,threads,rss_kb,pss_kb,anon_kb,file_kb,shmem_kb,swap_kb,mem_available_kb,swap_free_kb,gpu_load\n' > "$summary_file"
+printf 'timestamp\telapsed_s\tcategory\trss_kb\tpss_kb\tprivate_clean_kb\tprivate_dirty_kb\tshared_clean_kb\tshared_dirty_kb\tswap_kb\n' > "$maps_file"
+mkdir -p "$snapshots_dir"
+
+start_time="$(date +%s)"
+sample=0
+last_snapshot_rss=0
+
+status_value() {
+  key="$1"
+  [ -r "/proc/$pid/status" ] || {
+    printf '0\n'
+    return 0
+  }
+  awk -v key="$key" '$1 == key ":" { print $2; found = 1; exit } END { if (!found) print 0 }' "/proc/$pid/status" 2>/dev/null || printf '0\n'
+}
+
+meminfo_value() {
+  key="$1"
+  awk -v key="$key" '$1 == key ":" { print $2; found = 1; exit } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null || printf '0\n'
+}
+
+gpu_load() {
+  for load_file in /sys/class/devfreq/*gpu*/load /sys/class/devfreq/*mali*/load; do
+    [ -r "$load_file" ] || continue
+    tr -d '\n' < "$load_file"
+    return 0
+  done
+  printf 'NA'
+}
+
+append_rollup() {
+  [ -r "/proc/$pid/smaps_rollup" ] || {
+    printf '0,0,0,0,0,0\n'
+    return 0
+  }
+
+  awk '
+    $1 == "Rss:" { rss = $2 }
+    $1 == "Pss:" { pss = $2 }
+    $1 == "Anonymous:" { anon = $2 }
+    $1 == "Swap:" { swap = $2 }
+    END {
+      if (rss == "") rss = 0
+      if (pss == "") pss = 0
+      if (anon == "") anon = 0
+      if (swap == "") swap = 0
+      file = rss - anon
+      if (file < 0) file = 0
+      print rss "," pss "," anon "," file ",0," swap
+    }
+  ' "/proc/$pid/smaps_rollup" 2>/dev/null || printf '0,0,0,0,0,0\n'
+}
+
+append_maps() {
+  timestamp="$1"
+  elapsed="$2"
+
+  awk -v timestamp="$timestamp" -v elapsed="$elapsed" '
+    function category(path) {
+      if (path == "") return "[anon]"
+      if (path ~ /^\[/) return path
+      if (path ~ /\/gamedata\/data\/textures\//) return "gamedata:data/textures"
+      if (path ~ /\/gamedata\/data\/audio\//) return "gamedata:data/audio"
+      if (path ~ /\/gamedata\/data\/shaders\//) return "gamedata:data/shaders"
+      if (path ~ /\/gamedata\/data\/#sp#levels_sp\//) return "gamedata:data/levels"
+      if (path ~ /\/gamedata\/data\//) return "gamedata:data/other"
+      if (path ~ /\/gamedata\//) return "gamedata:root"
+      if (path ~ /\/ports\/theswapper\/libs/) return "port:libs"
+      if (path ~ /\/mono\//) return "mono-runtime"
+      if (path ~ /^\/usr\// || path ~ /^\/lib/ || path ~ /\/lib64\//) return "system-libs"
+      if (path ~ /^\/dev\//) return "device"
+      return "other-files"
+    }
+
+    /^[0-9a-fA-F]+-[0-9a-fA-F]+/ {
+      path = ""
+      if (NF >= 6) {
+        path = $6
+        for (i = 7; i <= NF; i++) path = path " " $i
+      }
+      current = category(path)
+      seen[current] = 1
+      next
+    }
+
+    $1 == "Rss:" { rss[current] += $2; next }
+    $1 == "Pss:" { pss[current] += $2; next }
+    $1 == "Private_Clean:" { private_clean[current] += $2; next }
+    $1 == "Private_Dirty:" { private_dirty[current] += $2; next }
+    $1 == "Shared_Clean:" { shared_clean[current] += $2; next }
+    $1 == "Shared_Dirty:" { shared_dirty[current] += $2; next }
+    $1 == "Swap:" { swap[current] += $2; next }
+
+    END {
+      for (key in seen) {
+        print timestamp "\t" elapsed "\t" key "\t" rss[key] + 0 "\t" pss[key] + 0 "\t" private_clean[key] + 0 "\t" private_dirty[key] + 0 "\t" shared_clean[key] + 0 "\t" shared_dirty[key] + 0 "\t" swap[key] + 0
+      }
+    }
+  ' "/proc/$pid/smaps" >> "$maps_file" 2>/dev/null || true
+}
+
+write_snapshot() {
+  timestamp="$1"
+  elapsed="$2"
+  vmrss="$3"
+  reason="$4"
+  snapshot_dir="$snapshots_dir/${elapsed}s-${vmrss}kb-${reason}"
+
+  mkdir -p "$snapshot_dir"
+  cp "/proc/$pid/status" "$snapshot_dir/status" 2>/dev/null || true
+  cp "/proc/$pid/statm" "$snapshot_dir/statm" 2>/dev/null || true
+  cp "/proc/$pid/maps" "$snapshot_dir/maps" 2>/dev/null || true
+  cp "/proc/$pid/smaps_rollup" "$snapshot_dir/smaps_rollup" 2>/dev/null || true
+  cp "/proc/$pid/smaps" "$snapshot_dir/smaps" 2>/dev/null || true
+  cp /proc/meminfo "$snapshot_dir/meminfo" 2>/dev/null || true
+  ps w > "$snapshot_dir/ps.txt" 2>/dev/null || true
+  dmesg | tail -n 80 > "$snapshot_dir/dmesg-tail.txt" 2>/dev/null || true
+  printf 'timestamp=%s\nelapsed_s=%s\nvmrss_kb=%s\nreason=%s\n' "$timestamp" "$elapsed" "$vmrss" "$reason" > "$snapshot_dir/meta.txt"
+}
+
+while [ -d "/proc/$pid" ]; do
+  timestamp="$(date +%s)"
+  elapsed=$((timestamp - start_time))
+
+  vmsize="$(status_value VmSize)"
+  vmrss="$(status_value VmRSS)"
+  vmdata="$(status_value VmData)"
+  threads="$(status_value Threads)"
+  rollup="$(append_rollup)"
+  old_ifs="$IFS"
+  IFS=,
+  set -- $rollup
+  IFS="$old_ifs"
+  rss="${1:-0}"
+  pss="${2:-0}"
+  anon="${3:-0}"
+  file="${4:-0}"
+  shmem="${5:-0}"
+  swap="${6:-0}"
+  mem_available="$(meminfo_value MemAvailable)"
+  swap_free="$(meminfo_value SwapFree)"
+  gpu="$(gpu_load)"
+
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    "$timestamp" "$elapsed" "$pid" "$vmsize" "$vmrss" "$vmdata" "$threads" \
+    "$rss" "$pss" "$anon" "$file" "$shmem" "$swap" "$mem_available" "$swap_free" "$gpu" \
+    >> "$summary_file"
+
+  if [ $((sample % 5)) -eq 0 ]; then
+    append_maps "$timestamp" "$elapsed"
+  fi
+
+  if [ "$vmrss" -gt 262144 ] && [ $((vmrss - last_snapshot_rss)) -ge 65536 ]; then
+    write_snapshot "$timestamp" "$elapsed" "$vmrss" "rss"
+    last_snapshot_rss="$vmrss"
+  elif [ "$mem_available" -gt 0 ] && [ "$mem_available" -lt 98304 ]; then
+    write_snapshot "$timestamp" "$elapsed" "$vmrss" "lowmem"
+  fi
+
+  sample=$((sample + 1))
+  sleep "$interval"
+done
