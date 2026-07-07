@@ -2,8 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-int MoveFileEx(const char *existing_name, const char *new_name, uint32_t flags)
-{
+int MoveFileEx(const char *existing_name, const char *new_name, uint32_t flags) {
     (void)flags;
 
     if (existing_name == NULL)
@@ -15,8 +14,7 @@ int MoveFileEx(const char *existing_name, const char *new_name, uint32_t flags)
     return rename(existing_name, new_name) == 0;
 }
 
-int DwmEnableComposition(uint32_t action)
-{
+int DwmEnableComposition(uint32_t action) {
     (void)action;
     return 0;
 }
