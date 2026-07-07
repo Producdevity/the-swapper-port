@@ -19,11 +19,11 @@ DiffuseQuality 1
 ParticleQuality 1
 IsFilmlookEnabled False
 IsPostFxEnabled False
-PostFxBlurQuality 1
+PostFxBlurQuality 0
 PostFxMotionBlurQuality False
 PostFxBloomQuality 0
 LightShaftQuality 1
-GBufferSampleAntialising 1
+GBufferSampleAntialising 0
 Dithering False
 Vignette 0
 HiResEdges False
