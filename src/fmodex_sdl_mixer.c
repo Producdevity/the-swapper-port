@@ -1,4 +1,5 @@
 #include <dlfcn.h>
+#include <sys/stat.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,12 +10,15 @@ typedef int32_t FMOD_RESULT;
 #define FMOD_OK 0
 #define SOUND_MAGIC 0x53575053u
 #define CHANNEL_MAGIC 0x53575043u
+#define LARGE_SOUND_BYTES (2 * 1024 * 1024)
+#define MAX_MIXER_CHANNELS 128
 
 typedef struct FmodSound {
     uint32_t magic;
     void *chunk;
     void *music;
     int stream;
+    int transient_chunk;
     int loop_count;
     float volume;
     char path[1024];
@@ -46,6 +50,7 @@ typedef int (*Mix_ResumeFn)(int);
 typedef int (*Mix_HaltChannelFn)(int);
 typedef int (*Mix_PlayingFn)(int);
 typedef void (*Mix_FreeChunkFn)(void *);
+typedef void (*Mix_ChannelFinishedFn)(void (*)(int));
 
 static uintptr_t next_handle = 0x10000;
 static int audio_loaded;
@@ -70,7 +75,10 @@ static Mix_ResumeFn p_Mix_Resume;
 static Mix_HaltChannelFn p_Mix_HaltChannel;
 static Mix_PlayingFn p_Mix_Playing;
 static Mix_FreeChunkFn p_Mix_FreeChunk;
+static Mix_ChannelFinishedFn p_Mix_ChannelFinished;
 static FmodChannel *active_music_channel;
+static void *owned_channel_chunks[MAX_MIXER_CHANNELS];
+static volatile int finished_channels[MAX_MIXER_CHANNELS];
 
 static void *new_handle(void) {
     next_handle += 0x10;
@@ -79,7 +87,7 @@ static void *new_handle(void) {
 
 static void trace_call(const char *name) {
     const char *enabled = getenv("SWAPPER_TRACE_NATIVE");
-    if (enabled == NULL || strcmp(enabled, "1") != 0)
+    if (enabled == NULL || strcmp(enabled, "verbose") != 0)
         return;
 
     FILE *file = fopen("fmodex-trace.log", "a");
@@ -91,7 +99,7 @@ static void trace_call(const char *name) {
 
 static void trace_value(const char *name, const char *value) {
     const char *enabled = getenv("SWAPPER_TRACE_NATIVE");
-    if (enabled == NULL || strcmp(enabled, "1") != 0)
+    if (enabled == NULL || (strcmp(enabled, "1") != 0 && strcmp(enabled, "verbose") != 0))
         return;
 
     FILE *file = fopen("fmodex-trace.log", "a");
@@ -101,8 +109,60 @@ static void trace_value(const char *name, const char *value) {
     }
 }
 
+static long long file_size_bytes(const char *path) {
+    struct stat st;
+    return path != NULL && stat(path, &st) == 0 ? (long long)st.st_size : -1;
+}
+
+static void trace_sound_event(const char *event, FmodSound *sound) {
+    const char *enabled = getenv("SWAPPER_TRACE_NATIVE");
+    if (enabled == NULL || (strcmp(enabled, "1") != 0 && strcmp(enabled, "verbose") != 0) ||
+        sound == NULL || sound->path[0] == '\0')
+        return;
+
+    FILE *file = fopen("fmodex-trace.log", "a");
+    if (file != NULL) {
+        fprintf(file, "%s\tstream=%d\ttransient=%d\tbytes=%lld\t%s\n", event, sound->stream,
+                sound->transient_chunk, file_size_bytes(sound->path), sound->path);
+        fclose(file);
+    }
+}
+
 static void *load_symbol(void *library, const char *name) {
     return library != NULL ? dlsym(library, name) : NULL;
+}
+
+static void channel_finished(int channel) {
+    if (channel >= 0 && channel < MAX_MIXER_CHANNELS)
+        finished_channels[channel] = 1;
+}
+
+static void cleanup_finished_chunks(void) {
+    if (p_Mix_FreeChunk == NULL)
+        return;
+
+    for (int i = 0; i < MAX_MIXER_CHANNELS; i++) {
+        if (!finished_channels[i])
+            continue;
+
+        finished_channels[i] = 0;
+        if (owned_channel_chunks[i] != NULL) {
+            p_Mix_FreeChunk(owned_channel_chunks[i]);
+            owned_channel_chunks[i] = NULL;
+        }
+    }
+}
+
+static void release_owned_channel_chunk(int channel) {
+    if (channel < 0 || channel >= MAX_MIXER_CHANNELS)
+        return;
+
+    finished_channels[channel] = 0;
+    if (owned_channel_chunks[channel] != NULL && p_Mix_FreeChunk != NULL) {
+        trace_value("FMOD_TransientChunkFree", "");
+        p_Mix_FreeChunk(owned_channel_chunks[channel]);
+        owned_channel_chunks[channel] = NULL;
+    }
 }
 
 static int init_audio(void) {
@@ -133,6 +193,7 @@ static int init_audio(void) {
     p_Mix_HaltChannel = (Mix_HaltChannelFn)load_symbol(mixer, "Mix_HaltChannel");
     p_Mix_Playing = (Mix_PlayingFn)load_symbol(mixer, "Mix_Playing");
     p_Mix_FreeChunk = (Mix_FreeChunkFn)load_symbol(mixer, "Mix_FreeChunk");
+    p_Mix_ChannelFinished = (Mix_ChannelFinishedFn)load_symbol(mixer, "Mix_ChannelFinished");
 
     if (p_SDL_RWFromFile == NULL || p_Mix_OpenAudio == NULL || p_Mix_LoadWAV_RW == NULL ||
         p_Mix_PlayChannelTimed == NULL)
@@ -143,6 +204,9 @@ static int init_audio(void) {
 
     if (p_Mix_AllocateChannels != NULL)
         p_Mix_AllocateChannels(32);
+
+    if (p_Mix_ChannelFinished != NULL)
+        p_Mix_ChannelFinished(channel_finished);
 
     audio_ready = 1;
     return 1;
@@ -161,6 +225,20 @@ static FmodChannel *as_channel(void *handle) {
 static int has_audio_extension(const char *path) {
     return path != NULL && (strstr(path, ".ogg") != NULL || strstr(path, ".wav") != NULL ||
                             strstr(path, ".OGG") != NULL || strstr(path, ".WAV") != NULL);
+}
+
+static int is_large_file(const char *path) {
+    struct stat st;
+    return path != NULL && stat(path, &st) == 0 && st.st_size >= LARGE_SOUND_BYTES;
+}
+
+static int is_voiceover_wav(const char *path) {
+    return path != NULL && strstr(path, "/under_construction/voiceover/") != NULL &&
+           (strstr(path, ".wav") != NULL || strstr(path, ".WAV") != NULL);
+}
+
+static int should_use_transient_chunk(const char *path) {
+    return is_large_file(path) || is_voiceover_wav(path);
 }
 
 static void clear_guid(void *guid) {
@@ -190,10 +268,19 @@ static FmodSound *create_sound(const char *path, int requested_stream) {
 
     if (has_audio_extension(path)) {
         strncpy(sound->path, path, sizeof(sound->path) - 1);
-        trace_value("FMOD_LoadPath", sound->path);
+        sound->transient_chunk = !sound->stream && should_use_transient_chunk(sound->path);
+        trace_sound_event("FMOD_LoadPath", sound);
     }
 
     return sound;
+}
+
+static void *load_chunk(const char *path) {
+    void *rw = p_SDL_RWFromFile(path, "rb");
+    if (rw == NULL)
+        return NULL;
+
+    return p_Mix_LoadWAV_RW(rw, 1);
 }
 
 static int load_sound(FmodSound *sound) {
@@ -204,11 +291,8 @@ static int load_sound(FmodSound *sound) {
     if (sound->path[0] == '\0' || !init_audio())
         return 0;
 
-    void *rw = p_SDL_RWFromFile(sound->path, "rb");
-    if (rw == NULL)
-        return 0;
-
-    sound->chunk = p_Mix_LoadWAV_RW(rw, 1);
+    trace_sound_event("FMOD_LoadChunk", sound);
+    sound->chunk = load_chunk(sound->path);
     return sound->chunk != NULL;
 }
 
@@ -220,6 +304,7 @@ static int load_music(FmodSound *sound) {
     if (sound->path[0] == '\0' || !init_audio() || p_Mix_LoadMUS == NULL)
         return 0;
 
+    trace_sound_event("FMOD_LoadMusic", sound);
     sound->music = p_Mix_LoadMUS(sound->path);
     return sound->music != NULL;
 }
@@ -234,8 +319,29 @@ static FmodChannel *play_chunk_sound(FmodSound *sound, int paused) {
     channel->music_channel = 0;
     channel->sound = sound;
 
-    if (load_sound(sound)) {
-        channel->mixer_channel = p_Mix_PlayChannelTimed(-1, sound->chunk, sound->loop_count, -1);
+    cleanup_finished_chunks();
+
+    void *chunk = NULL;
+    if (sound != NULL && sound->transient_chunk) {
+        if (sound->path[0] == '\0' || !init_audio()) {
+            return channel;
+        }
+        chunk = load_chunk(sound->path);
+        if (chunk != NULL)
+            trace_sound_event("FMOD_TransientPlay", sound);
+    } else if (load_sound(sound)) {
+        chunk = sound->chunk;
+    }
+
+    if (chunk != NULL) {
+        channel->mixer_channel = p_Mix_PlayChannelTimed(-1, chunk, sound->loop_count, -1);
+        if (channel->mixer_channel < 0 && sound->transient_chunk && p_Mix_FreeChunk != NULL)
+            p_Mix_FreeChunk(chunk);
+        if (channel->mixer_channel >= 0 && sound->transient_chunk &&
+            channel->mixer_channel < MAX_MIXER_CHANNELS) {
+            release_owned_channel_chunk(channel->mixer_channel);
+            owned_channel_chunks[channel->mixer_channel] = chunk;
+        }
         if (channel->mixer_channel >= 0 && p_Mix_Volume != NULL) {
             int volume = (int)(sound->volume * 128.0f);
             if (volume < 0)
@@ -411,18 +517,22 @@ FMOD_RESULT FMOD_Sound_SetLoopCount(void *sound_handle, int32_t count) {
 
 FMOD_RESULT FMOD_Sound_Release(void *sound_handle) {
     trace_call("FMOD_Sound_Release");
+    cleanup_finished_chunks();
     FmodSound *sound = as_sound(sound_handle);
     if (sound == NULL)
         return FMOD_OK;
 
-    if (sound->chunk != NULL && p_Mix_FreeChunk != NULL)
+    if (sound->chunk != NULL && p_Mix_FreeChunk != NULL) {
+        trace_sound_event("FMOD_FreeChunk", sound);
         p_Mix_FreeChunk(sound->chunk);
+    }
     if (sound->music != NULL && p_Mix_FreeMusic != NULL) {
         if (active_music_channel != NULL && active_music_channel->sound == sound &&
             p_Mix_HaltMusic != NULL) {
             p_Mix_HaltMusic();
             active_music_channel = NULL;
         }
+        trace_sound_event("FMOD_FreeMusic", sound);
         p_Mix_FreeMusic(sound->music);
     }
     sound->magic = 0;
@@ -432,6 +542,7 @@ FMOD_RESULT FMOD_Sound_Release(void *sound_handle) {
 
 FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume) {
     trace_call("FMOD_Channel_SetVolume");
+    cleanup_finished_chunks();
     FmodChannel *channel = as_channel(channel_handle);
     if (channel != NULL && channel->music_channel && p_Mix_VolumeMusic != NULL) {
         int mixer_volume = (int)(volume * 128.0f);
@@ -456,6 +567,7 @@ FMOD_RESULT FMOD_Channel_SetVolume(void *channel_handle, float volume) {
 
 FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused) {
     trace_call("FMOD_Channel_SetPaused");
+    cleanup_finished_chunks();
     FmodChannel *channel = as_channel(channel_handle);
     if (channel != NULL && channel->music_channel) {
         if (paused && p_Mix_PauseMusic != NULL)
@@ -476,6 +588,7 @@ FMOD_RESULT FMOD_Channel_SetPaused(void *channel_handle, int32_t paused) {
 
 FMOD_RESULT FMOD_Channel_IsPlaying(void *channel_handle, int32_t *playing) {
     trace_call("FMOD_Channel_IsPlaying");
+    cleanup_finished_chunks();
     FmodChannel *channel = as_channel(channel_handle);
     if (playing != NULL) {
         if (channel != NULL && channel->music_channel && p_Mix_PlayingMusic != NULL) {
@@ -492,6 +605,7 @@ FMOD_RESULT FMOD_Channel_IsPlaying(void *channel_handle, int32_t *playing) {
 
 FMOD_RESULT FMOD_Channel_Stop(void *channel_handle) {
     trace_call("FMOD_Channel_Stop");
+    cleanup_finished_chunks();
     FmodChannel *channel = as_channel(channel_handle);
     if (channel != NULL && channel->music_channel) {
         if (active_music_channel == channel) {
@@ -502,8 +616,10 @@ FMOD_RESULT FMOD_Channel_Stop(void *channel_handle) {
         return FMOD_OK;
     }
 
-    if (channel != NULL && channel->mixer_channel >= 0 && p_Mix_HaltChannel != NULL)
+    if (channel != NULL && channel->mixer_channel >= 0 && p_Mix_HaltChannel != NULL) {
         p_Mix_HaltChannel(channel->mixer_channel);
+        release_owned_channel_chunk(channel->mixer_channel);
+    }
     return FMOD_OK;
 }
 
