@@ -11,13 +11,16 @@ summary_file="$out_dir/summary.csv"
 maps_file="$out_dir/maps.tsv"
 snapshots_dir="$out_dir/snapshots"
 
-printf 'timestamp,elapsed_s,pid,vmsize_kb,vmrss_kb,vmdata_kb,threads,rss_kb,pss_kb,anon_kb,file_kb,shmem_kb,swap_kb,mem_available_kb,swap_free_kb,gpu_load\n' > "$summary_file"
+printf 'timestamp,elapsed_s,pid,vmsize_kb,vmrss_kb,vmdata_kb,threads,rss_kb,pss_kb,anon_kb,file_kb,shmem_kb,swap_kb,mem_available_kb,swap_free_kb,gpu_load,gpu_mem_pages,gpu_freq_hz,cpu_freq_hz,cpu_temp_millic,gpu_temp_millic,load1,proc_cpu_pct\n' > "$summary_file"
 printf 'timestamp\telapsed_s\tcategory\trss_kb\tpss_kb\tprivate_clean_kb\tprivate_dirty_kb\tshared_clean_kb\tshared_dirty_kb\tswap_kb\n' > "$maps_file"
 mkdir -p "$snapshots_dir"
 
 start_time="$(date +%s)"
+clock_ticks="$(getconf CLK_TCK 2>/dev/null || printf '100\n')"
 sample=0
 last_snapshot_rss=0
+last_cpu_ticks=""
+last_cpu_time=""
 
 status_value() {
   key="$1"
@@ -39,7 +42,105 @@ gpu_load() {
     tr -d '\n' < "$load_file"
     return 0
   done
+
+  if [ -r /sys/kernel/debug/sunxi_gpu/dump ]; then
+    awk -F '[:%;]' '
+      /Utilisation from last show/ {
+        gsub(/[[:space:]]/, "", $2)
+        print $2
+        found = 1
+        exit
+      }
+      END {
+        if (!found) print "NA"
+      }
+    ' /sys/kernel/debug/sunxi_gpu/dump
+    return 0
+  fi
+
   printf 'NA'
+}
+
+gpu_mem_pages() {
+  for memory_file in /sys/kernel/debug/mali*/gpu_memory; do
+    [ -r "$memory_file" ] || continue
+    awk 'NR == 1 { print $2; found = 1; exit } END { if (!found) print "NA" }' "$memory_file"
+    return 0
+  done
+  printf 'NA'
+}
+
+gpu_freq_hz() {
+  for freq_file in \
+    /sys/class/devfreq/*gpu*/cur_freq \
+    /sys/class/devfreq/*mali*/cur_freq \
+    /sys/devices/platform/gpu/devfreq/gpu/cur_freq \
+    /sys/kernel/debug/clk/gpu0/clk_rate; do
+    [ -r "$freq_file" ] || continue
+    tr -d '\n' < "$freq_file"
+    return 0
+  done
+  printf 'NA'
+}
+
+cpu_freq_hz() {
+  for freq_file in \
+    /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq \
+    /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq; do
+    [ -r "$freq_file" ] || continue
+    awk '{ print $1 * 1000 }' "$freq_file"
+    return 0
+  done
+  printf 'NA'
+}
+
+thermal_temp_millic() {
+  type_pattern="$1"
+
+  for temp_file in /sys/class/thermal/thermal_zone*/temp; do
+    [ -r "$temp_file" ] || continue
+    type_file="${temp_file%/temp}/type"
+    zone_type="$(cat "$type_file" 2>/dev/null || true)"
+    case "$zone_type" in
+      *"$type_pattern"*)
+        tr -d '\n' < "$temp_file"
+        return 0
+        ;;
+    esac
+  done
+  printf 'NA'
+}
+
+load1() {
+  awk '{ print $1 }' /proc/loadavg 2>/dev/null || printf 'NA\n'
+}
+
+process_cpu_ticks() {
+  [ -r "/proc/$pid/stat" ] || {
+    printf '0\n'
+    return 0
+  }
+  awk '{ print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null || printf '0\n'
+}
+
+process_cpu_pct() {
+  now="$1"
+  ticks="$2"
+
+  if [ -z "$last_cpu_ticks" ] || [ -z "$last_cpu_time" ]; then
+    printf '0.0\n'
+    return 0
+  fi
+
+  elapsed_ticks=$((ticks - last_cpu_ticks))
+  elapsed_time=$((now - last_cpu_time))
+  if [ "$elapsed_ticks" -lt 0 ] || [ "$elapsed_time" -le 0 ] || [ "$clock_ticks" -le 0 ]; then
+    printf '0.0\n'
+    return 0
+  fi
+
+  awk -v ticks="$elapsed_ticks" -v hz="$clock_ticks" -v seconds="$elapsed_time" \
+    'BEGIN { printf "%.1f\n", (ticks * 100.0) / (hz * seconds) }'
 }
 
 append_rollup() {
@@ -154,11 +255,23 @@ while [ -d "/proc/$pid" ]; do
   mem_available="$(meminfo_value MemAvailable)"
   swap_free="$(meminfo_value SwapFree)"
   gpu="$(gpu_load)"
+  gpu_pages="$(gpu_mem_pages)"
+  gpu_freq="$(gpu_freq_hz)"
+  cpu_freq="$(cpu_freq_hz)"
+  cpu_temp="$(thermal_temp_millic cpu)"
+  gpu_temp="$(thermal_temp_millic gpu)"
+  load_average="$(load1)"
+  cpu_ticks="$(process_cpu_ticks)"
+  cpu_pct="$(process_cpu_pct "$timestamp" "$cpu_ticks")"
 
-  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
     "$timestamp" "$elapsed" "$pid" "$vmsize" "$vmrss" "$vmdata" "$threads" \
     "$rss" "$pss" "$anon" "$file" "$shmem" "$swap" "$mem_available" "$swap_free" "$gpu" \
+    "$gpu_pages" "$gpu_freq" "$cpu_freq" "$cpu_temp" "$gpu_temp" "$load_average" "$cpu_pct" \
     >> "$summary_file"
+
+  last_cpu_ticks="$cpu_ticks"
+  last_cpu_time="$timestamp"
 
   if [ $((sample % 5)) -eq 0 ]; then
     append_maps "$timestamp" "$elapsed"
