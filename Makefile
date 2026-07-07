@@ -62,8 +62,11 @@ package: all
 	rm -rf "$(PACKAGE_DIR)"
 	mkdir -p "$(PORT_DIR)"
 	cp -R packaging/ports/theswapper/. "$(PORT_DIR)/"
-	cp -R "$(LIB_DIR)/." "$(PORT_DIR)/theswapper/libs.aarch64/"
-	cp -R "$(TOOL_DIR)/." "$(PORT_DIR)/theswapper/tools/"
+	mkdir -p "$(PORT_DIR)/theswapper/libs.aarch64" "$(PORT_DIR)/theswapper/tools"
+	cp $(NATIVE_LIBS) "$(LIB_DIR)/kernel32" "$(LIB_DIR)/dwmapi" \
+	  "$(LIB_DIR)/libkernel32.so" "$(LIB_DIR)/libdwmapi.so" \
+	  "$(PORT_DIR)/theswapper/libs.aarch64/"
+	cp $(NATIVE_TOOLS) "$(PORT_DIR)/theswapper/tools/"
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
 	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup" \
 	  "$(PORT_DIR)/theswapper/tools/mem-profile" "$(PORT_DIR)/theswapper/tools/texture-astc-manifest" \
