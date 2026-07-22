@@ -4,3 +4,4 @@ dist/
 *.o
 *.d
 .DS_Store
+.idea/
