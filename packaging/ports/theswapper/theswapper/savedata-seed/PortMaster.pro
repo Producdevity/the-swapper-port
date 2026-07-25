@@ -23,7 +23,7 @@ PostFxBlurQuality 0
 PostFxMotionBlurQuality False
 PostFxBloomQuality 0
 LightShaftQuality 1
-GBufferSampleAntialising 0
+GBufferSampleAntialising 1
 Dithering False
 Vignette 0
 HiResEdges False
