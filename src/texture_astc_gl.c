@@ -68,7 +68,6 @@ static size_t failed_uploads;
 static size_t fallback_uploads;
 static size_t upload_debug_count;
 static size_t candidate_miss_debug_count;
-static size_t candidate_miss_dump_count;
 static size_t replacement_debug_count;
 static size_t large_alloc_debug_count;
 
@@ -167,12 +166,6 @@ static void *real_dlsym(void *handle, const char *name) {
         return NULL;
 
     return real_dlsym_fn(handle, name);
-}
-
-static int dlsym_hook_enabled(void) {
-    const char *disabled = getenv("SWAPPER_ASTC_DISABLE_DLSYM_HOOK");
-
-    return disabled == NULL || strcmp(disabled, "1") != 0;
 }
 
 static int env_enabled(const char *name) {
@@ -472,34 +465,6 @@ static const struct astc_entry *find_entry(uint64_t hash, int width, int height)
     return NULL;
 }
 
-static void dump_candidate_miss(GLsizei width, GLsizei height, uint64_t hash, const void *pixels,
-                                size_t pixels_size) {
-    char path[PATH_MAX];
-    FILE *file;
-
-    if (!env_enabled("SWAPPER_ASTC_DUMP_MISSES") || candidate_miss_dump_count >= 8 ||
-        cache_dir[0] == '\0')
-        return;
-    if (pixels_size < 1024 * 1024)
-        return;
-
-    if (snprintf(path, sizeof(path), "%s/miss-%zux%zu-%016llx-%zu.rgba", cache_dir, (size_t)width,
-                 (size_t)height, (unsigned long long)hash,
-                 candidate_miss_dump_count) >= (int)sizeof(path))
-        return;
-
-    file = fopen(path, "wb");
-    if (file == NULL)
-        return;
-
-    if (pixels_size != 0)
-        fwrite(pixels, 1, pixels_size, file);
-    fclose(file);
-
-    fprintf(stderr, "SwapperASTC: dumped candidate miss %s bytes=%zu\n", path, pixels_size);
-    candidate_miss_dump_count++;
-}
-
 static unsigned char *read_file(const char *path, size_t *out_size) {
     FILE *file = fopen(path, "rb");
     long size;
@@ -587,7 +552,6 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
                     "bytes=%zu\n",
                     api, level, width, height, (unsigned long long)hash, pixels_size);
         }
-        dump_candidate_miss(width, height, hash, pixels, pixels_size);
         return 0;
     }
 
@@ -791,9 +755,6 @@ void *dlsym(void *handle, const char *name) {
     void *hooked;
 
     log_dlsym_seen(name, return_address);
-
-    if (!dlsym_hook_enabled())
-        return real_dlsym(handle, name);
 
     if (!caller_is_mono_runtime(return_address))
         return real_dlsym(handle, name);
