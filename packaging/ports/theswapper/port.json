@@ -23,7 +23,7 @@
       }
     ],
     "availability": "paid",
-    "reqs": ["!rk3326"],
+    "reqs": ["!lowres", "power"],
     "arch": ["aarch64"],
     "min_glibc": ""
   }
