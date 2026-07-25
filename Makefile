@@ -23,7 +23,7 @@ NATIVE_TOOLS := \
   $(TOOL_DIR)/texture-astc-manifest \
   $(TOOL_DIR)/texture-downscale
 
-all: $(NATIVE_LIBS) $(NATIVE_TOOLS) aliases
+all: $(NATIVE_LIBS) $(NATIVE_TOOLS)
 
 $(LIB_DIR):
 	mkdir -p $@
@@ -52,20 +52,13 @@ $(TOOL_DIR)/texture-astc-manifest: src/texture_astc_manifest.c | $(TOOL_DIR)
 $(TOOL_DIR)/texture-downscale: src/texture_downscale.c | $(TOOL_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
-aliases: $(LIB_DIR)/libwindows_stub.so
-	cp -f $< $(LIB_DIR)/kernel32
-	cp -f $< $(LIB_DIR)/dwmapi
-	cp -f $< $(LIB_DIR)/libkernel32.so
-	cp -f $< $(LIB_DIR)/libdwmapi.so
-
 package: all
 	rm -rf "$(PACKAGE_DIR)"
 	mkdir -p "$(PORT_DIR)"
 	cp -R packaging/ports/theswapper/. "$(PORT_DIR)/"
-	mkdir -p "$(PORT_DIR)/theswapper/libs.aarch64" "$(PORT_DIR)/theswapper/tools"
-	cp $(NATIVE_LIBS) "$(LIB_DIR)/kernel32" "$(LIB_DIR)/dwmapi" \
-	  "$(LIB_DIR)/libkernel32.so" "$(LIB_DIR)/libdwmapi.so" \
-	  "$(PORT_DIR)/theswapper/libs.aarch64/"
+	mkdir -p "$(PORT_DIR)/theswapper/gamedata" "$(PORT_DIR)/theswapper/libs.aarch64" \
+	  "$(PORT_DIR)/theswapper/tools"
+	cp $(NATIVE_LIBS) "$(PORT_DIR)/theswapper/libs.aarch64/"
 	cp $(NATIVE_TOOLS) "$(PORT_DIR)/theswapper/tools/"
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
 	chmod +x "$(PORT_DIR)/theswapper/tools/setup" \
@@ -94,4 +87,4 @@ docker-build:
 clean:
 	rm -rf "$(BUILD_DIR)"
 
-.PHONY: all aliases package zip docker-build clean
+.PHONY: all package zip docker-build clean
