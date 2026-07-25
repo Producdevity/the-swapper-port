@@ -68,8 +68,8 @@ package: all
 	  "$(PORT_DIR)/theswapper/libs.aarch64/"
 	cp $(NATIVE_TOOLS) "$(PORT_DIR)/theswapper/tools/"
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
-	chmod +x "$(PORT_DIR)/The Swapper.sh" "$(PORT_DIR)/theswapper/tools/setup" \
-	  "$(PORT_DIR)/theswapper/tools/mem-profile" "$(PORT_DIR)/theswapper/tools/texture-astc-manifest" \
+	chmod +x "$(PORT_DIR)/theswapper/tools/setup" \
+	  "$(PORT_DIR)/theswapper/tools/texture-astc-manifest" \
 	  "$(PORT_DIR)/theswapper/tools/texture-downscale" \
 	  "$(PORT_DIR)/theswapper/tools/xdg-open"
 
