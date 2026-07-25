@@ -19,7 +19,7 @@ NORMAL_MAP_MAX_DIMENSION=512
 ATLAS_MAX_DIMENSION=0
 
 mkdir -p "$GAMEDATA" "$PROFILE_DIR"
-> "$SETUP_LOG"
+: >"$SETUP_LOG"
 exec > >(tee -a "$SETUP_LOG") 2>&1
 
 fail() {
