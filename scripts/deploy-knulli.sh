@@ -165,6 +165,7 @@ rsync -rt --delete --no-owner --no-group --omit-dir-times \
   "$payload/" "$host:$gamedir/"
 rsync -rt --no-owner --no-group --omit-dir-times \
   "$package_root/README.md" \
+  "$package_root/cover.png" \
   "$package_root/gameinfo.xml" \
   "$package_root/port.json" \
   "$package_root/screenshot.png" \
