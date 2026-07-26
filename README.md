@@ -1,10 +1,10 @@
-# The Swapper PortMaster Source
+# The Swapper - Linux ARM Port
 
-PortMaster packaging and compatibility code for the Windows Steam release of
-The Swapper.
+The Swapper ported to PortMaster compatible devices and CFW's. 
+This is for the Windows [Steam release of The Swapper](https://store.steampowered.com/app/231160/The_Swapper/).
 
-This repository does not contain game data. Users must provide their own
-legally owned copy of the game.
+**This repository does not contain game data. Users must provide their own
+legally owned copy of the game.**
 
 <img width="4032" height="3024" alt="TheSwapper_Anbernic_RG40XX-H" src="https://github.com/user-attachments/assets/33d81d3d-9d48-46e3-81b9-ffc88783fbfe" />
 
