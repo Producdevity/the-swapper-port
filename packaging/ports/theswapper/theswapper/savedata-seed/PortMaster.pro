@@ -1,5 +1,5 @@
 Profile
-Name CommonSettings
+Name PortMaster
 OwnDeaths 0
 CloneMurders 0
 ClonesCreated 0
@@ -12,18 +12,18 @@ AudioVolume 1
 AudioMusicVolume 0.75
 AudioEffectVolume 1
 AudioAtmosphereVolume 1
-MaxAudioChannels 64
+MaxAudioChannels 24
 IsFullscreen True
-ShadowQuality 3
-DiffuseQuality 2
-ParticleQuality 2
-IsFilmlookEnabled True
-IsPostFxEnabled True
+ShadowQuality 1
+DiffuseQuality 1
+ParticleQuality 1
+IsFilmlookEnabled False
+IsPostFxEnabled False
 PostFxBlurQuality 0
 PostFxMotionBlurQuality False
 PostFxBloomQuality 0
-LightShaftQuality 0
-GBufferSampleAntialising 0
+LightShaftQuality 1
+GBufferSampleAntialising 1
 Dithering False
 Vignette 0
 HiResEdges False
