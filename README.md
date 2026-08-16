@@ -71,6 +71,12 @@ Deploy to a Knulli device:
 scripts/deploy-knulli.sh <ssh-host>
 ```
 
+Deploy to a ROCKNIX device:
+
+```bash
+scripts/deploy-rocknix.sh <ssh-host>
+```
+
 Deploy to an AArch64 dArkOS device:
 
 ```bash
@@ -83,6 +89,7 @@ autoinstall folder:
 ```bash
 scripts/deploy-muos.sh --autoinstall <ssh-host>
 scripts/deploy-knulli.sh --autoinstall <ssh-host>
+scripts/deploy-rocknix.sh --autoinstall <ssh-host>
 scripts/deploy-darkos.sh --autoinstall <ssh-host>
 ```
 
@@ -95,6 +102,8 @@ The Knulli and dArkOS helpers also accept explicit directories for a two-SD-card
 ```bash
 scripts/deploy-knulli.sh --ports-dir /userdata/roms/ports <ssh-host>
 scripts/deploy-knulli.sh --autoinstall-dir /userdata/system/.local/share/PortMaster/autoinstall <ssh-host>
+scripts/deploy-rocknix.sh --ports-dir /storage/roms/ports <ssh-host>
+scripts/deploy-rocknix.sh --autoinstall-dir /storage/roms/ports/PortMaster/autoinstall <ssh-host>
 scripts/deploy-darkos.sh --ports-dir /roms/ports <ssh-host>
 scripts/deploy-darkos.sh --autoinstall-dir /roms/tools/PortMaster/autoinstall <ssh-host>
 ```
