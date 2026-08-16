@@ -1,6 +1,6 @@
 # The Swapper - Linux ARM Port
 
-The Swapper ported to PortMaster compatible devices and CFW's. 
+The Swapper ported to PortMaster-compatible devices and CFWs.
 This is for the Windows [Steam release of The Swapper](https://store.steampowered.com/app/231160/The_Swapper/).
 
 **This repository does not contain game data. Users must provide their own
@@ -71,7 +71,7 @@ Deploy to a Knulli device:
 scripts/deploy-knulli.sh <ssh-host>
 ```
 
-Deploy to a dArkOS (UNSUPPORTED) device:
+Deploy to an AArch64 dArkOS device:
 
 ```bash
 scripts/deploy-darkos.sh <ssh-host>
@@ -90,7 +90,7 @@ Then open PortMaster on the device. PortMaster will install the zip and update
 the frontend metadata.
 
 The deploy scripts use the standard single-card PortMaster paths by default.
-The Knulli and dArkOS helpers also accept explicit directories if you have 2 SD card setup:
+The Knulli and dArkOS helpers also accept explicit directories for a two-SD-card setup:
 
 ```bash
 scripts/deploy-knulli.sh --ports-dir /userdata/roms/ports <ssh-host>
@@ -118,5 +118,5 @@ where files already have been partially patched.
 The launcher uses PortMaster's patcher UI for first-run setup. The setup step
 validates the game files, installs the Mono DLL map, downscales selected texture
 assets in the user's local `gamedata` copy, seeds a low-spec profile if no
-profile exists yet, and marks setup complete. The low-spec profile just turns off
-all improved graphic settings. It'll be ugly, but at least it'll be running above 12fps.
+profile exists yet, and marks setup complete. The seeded profile disables the
+improved graphics settings to reduce memory use on 1 GB devices.
