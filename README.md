@@ -97,7 +97,7 @@ Then open PortMaster on the device. PortMaster will install the zip and update
 the frontend metadata.
 
 The deploy scripts use the standard single-card PortMaster paths by default.
-The Knulli and dArkOS helpers also accept explicit directories for a two-SD-card setup:
+The Knulli, ROCKNIX, and dArkOS helpers also accept explicit directories for a two-SD-card setup:
 
 ```bash
 scripts/deploy-knulli.sh --ports-dir /userdata/roms/ports <ssh-host>
