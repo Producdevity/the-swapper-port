@@ -77,11 +77,11 @@ prepare_astc_cache() {
     guide_path="$ASTC_GUIDE_DIR/$relative_path.guide"
     mkdir -p "${guide_path%/*}"
     if [ -f "$guide_path" ]; then
-      "$ASTC_ENCODER" "$profile" "$source_path" "$astc_path" "$block" -fast -guide-in "$guide_path" ||
+      "$ASTC_ENCODER" "$profile" "$source_path" "$astc_path" "$block" -fast -silent -guide-in "$guide_path" ||
         rm -f "$astc_path" "$guide_path"
     fi
     if [ ! -f "$astc_path" ] &&
-      ! "$ASTC_ENCODER" "$profile" "$source_path" "$astc_path" "$block" -fast -guide-out "$guide_path"; then
+      ! "$ASTC_ENCODER" "$profile" "$source_path" "$astc_path" "$block" -fast -silent -guide-out "$guide_path"; then
       rm -f "$astc_path"
       fail "ASTC compression failed for $relative_path."
     fi
