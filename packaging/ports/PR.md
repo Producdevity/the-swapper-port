@@ -14,22 +14,23 @@
 
 Ensure your game has been tested on all major CFWs:
 
-- [x] ArkOS (R36S / RK3326 not supported)
+- [ ] ArkOS
 - [ ] AmberELEC
-- [ ] ROCKNIX
-- [x] muOS
-- [x] Knulli
+- [x] ROCKNIX (RG40XX-H / H700, Panfrost)
+- [x] muOS (RG35XX-H / H700)
+- [x] Knulli (RG40XX-H / H700)
 - [ ] Crossmix (Optional)
-- [x] Other: dArkOS (R36S / RK3326 not supported)
+- [x] dArkOS (R36S / RK3326)
 
 ### Resolution Tests
 
 Test all major resolutions:
 
-- [ ] 480x320 (Optional)
+- [ ] 320x240 (Optional)
 - [x] 640x480
-- [ ] 720x720 (RGB30) (Optional)
-- [ ] Higher resolutions (e.g., 1280x720)
+- [ ] 1024x768
+- [ ] 1280x720
+- [ ] 720x720
 
 ## File Structure
 
@@ -48,12 +49,11 @@ Test all major resolutions:
 
 The launch script follows the standard PortMaster Mono lifecycle (tasksetter, CFW GL configuration via `libgl_${CFW_NAME}.txt`, `pm_finish`). Non-standard elements:
 
-- **First-launch patcher**: ASTC texture compression + normal-map downscaling to fit GPU memory budget on 1GB devices. Uses PortMaster's patcher UI (`utils/patcher.txt`).
-- **ASTC runtime hook** (`libtexture_astc.so` via `LD_PRELOAD`): intercepts `glTexImage2D` at runtime to substitute pre-compressed ASTC textures to reduce VRAM usage.
+- **First-launch patcher**: uses `utils/patcher.txt` for ASTC texture compression and normal-map downscaling.
+- **Texture compression hook** (`libtexture_astc.so` via `LD_PRELOAD`): substitutes pre-compressed ASTC textures on supported drivers. Mali-G31 Panfrost uses runtime BC3 compression because its advertised native ASTC path crashes when sampled.
 - **FMOD compatibility layer** (`libfmodex.so`): translates FMOD audio calls to SDL_mixer, including streaming for large audio assets.
-- **Steam shim** (`libsteam_api.so`): reports Steam as unavailable. Does not emulate Steam, bypass ownership, or decrypt tickets.
-- **`MONO_MANAGED_WATCHER=1`**: required to prevent a Mono FileSystemWatcher infinite-recursion crash on Linux.
-- **gl4es**: bundled in `gl4es.aarch64/` and loaded via `SDL_VIDEO_GL_DRIVER`. The game's engine requires desktop GL version strings that GLES-only devices don't provide.
+- **Steam shim** (`libsteam_api.so`): reports Steam as unavailable. Doesn't emulate, bypass ownership, or decrypt tickets.
+- **`MONO_MANAGED_WATCHER=1`**: to prevent a Mono FileSystemWatcher infinite-recursion crash.
 
 ## Additional Resources
 

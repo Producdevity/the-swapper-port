@@ -11,10 +11,12 @@
 #define GL_EXTENSIONS 0x1F03
 #define GL_NO_ERROR 0
 #define GL_TEXTURE_2D 0x0DE1
+#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT 0x83F3
 #define GL_RGB 0x1907
 #define GL_RGBA 0x1908
 #define GL_BGRA 0x80E1
 #define GL_UNSIGNED_BYTE 0x1401
+#define GL_RENDERER 0x1F01
 #define GL_VERSION 0x1F02
 
 typedef unsigned int GLenum;
@@ -58,6 +60,7 @@ static size_t entry_count;
 static int initialized;
 static int astc_advertised = -1;
 static int astc_disabled;
+static int panfrost_bc3_fallback = -1;
 static int startup_logged;
 static int first_result_logged;
 static char cache_dir[PATH_MAX];
@@ -378,6 +381,25 @@ static int can_try_astc(void) {
     return 1;
 }
 
+static int use_panfrost_bc3_fallback(void) {
+    const char *renderer;
+    const char *extensions;
+
+    if (panfrost_bc3_fallback >= 0)
+        return panfrost_bc3_fallback;
+
+    resolve_gl();
+    renderer = real_gl_get_string == NULL ? NULL : (const char *)real_gl_get_string(GL_RENDERER);
+    extensions =
+        real_gl_get_string == NULL ? NULL : (const char *)real_gl_get_string(GL_EXTENSIONS);
+    panfrost_bc3_fallback =
+        renderer != NULL && strstr(renderer, "Mali-G31") != NULL &&
+        strstr(renderer, "Panfrost") != NULL && extensions != NULL &&
+        (extension_contains(extensions, "GL_EXT_texture_compression_s3tc") ||
+         extension_contains(extensions, "GL_ANGLE_texture_compression_dxt5"));
+    return panfrost_bc3_fallback;
+}
+
 __attribute__((constructor)) static void log_loaded(void) {
     if (!env_enabled("SWAPPER_ASTC_DEBUG"))
         return;
@@ -530,8 +552,23 @@ static size_t pixel_size(GLenum format, GLenum type, GLsizei width, GLsizei heig
     return (size_t)width * (size_t)height * components;
 }
 
+static void log_compressed_call(const char *api, const char *method, GLint level, GLsizei width,
+                                GLsizei height, const struct astc_entry *entry, uint64_t hash,
+                                size_t payload_size) {
+    if (!env_enabled("SWAPPER_ASTC_DEBUG"))
+        return;
+
+    fprintf(stderr,
+            "SwapperASTC: compressed call %s method=%s level=%d width=%d height=%d "
+            "format=0x%x hash=%016llx payload=%zu path=%s\n",
+            api, method, level, width, height, entry->internal_format,
+            (unsigned long long)hash, payload_size, entry->path);
+    fflush(stderr);
+}
+
 static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei width,
-                           GLsizei height, GLint border, const void *pixels, size_t pixels_size) {
+                           GLsizei height, GLint border, GLenum format, GLenum type,
+                           const void *pixels, size_t pixels_size) {
     uint64_t hash;
     const struct astc_entry *entry;
 
@@ -555,14 +592,54 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
         return 0;
     }
 
+    matched_uploads++;
+    if (use_panfrost_bc3_fallback()) {
+        /* G31 Panfrost advertises ASTC but crashes when sampling it. Keep every matched upload
+         * off that path; subimages can use the original uncompressed update API. */
+        if (strcmp(api, "glTexImage2D") != 0)
+            return 0;
+
+        if (env_enabled("SWAPPER_ASTC_DEBUG")) {
+            fprintf(stderr,
+                    "SwapperASTC: Panfrost BC3 call level=%d width=%d height=%d "
+                    "hash=%016llx path=%s\n",
+                    level, width, height, (unsigned long long)hash, entry->path);
+            fflush(stderr);
+        }
+
+        real_gl_tex_image_2d(target, level, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, width, height,
+                             border, format, type, pixels);
+        GLenum error = real_gl_get_error == NULL ? GL_NO_ERROR : real_gl_get_error();
+        if (error == GL_NO_ERROR) {
+            replaced_uploads++;
+            if (env_enabled("SWAPPER_ASTC_DEBUG")) {
+                fprintf(stderr,
+                        "SwapperASTC: Panfrost BC3 accepted level=%d width=%d height=%d "
+                        "hash=%016llx\n",
+                        level, width, height, (unsigned long long)hash);
+            }
+            return 1;
+        }
+
+        failed_uploads++;
+        if (env_enabled("SWAPPER_ASTC_DEBUG")) {
+            fprintf(stderr,
+                    "SwapperASTC: Panfrost BC3 rejected level=%d width=%d height=%d "
+                    "hash=%016llx error=0x%x\n",
+                    level, width, height, (unsigned long long)hash, error);
+        }
+        return 0;
+    }
+
     size_t astc_size = 0;
     unsigned char *astc = read_file(entry->path, &astc_size);
     const unsigned char *payload = NULL;
     size_t payload_size = 0;
 
-    matched_uploads++;
     if (astc != NULL &&
         astc_payload(astc, astc_size, width, height, &payload, &payload_size) == 0) {
+        log_compressed_call(api, "glCompressedTexImage2D", level, width, height, entry, hash,
+                            payload_size);
         real_gl_compressed_tex_image_2d(target, level, entry->internal_format, width, height,
                                         border, (GLsizei)payload_size, payload);
         GLenum error = real_gl_get_error == NULL ? GL_NO_ERROR : real_gl_get_error();
@@ -626,7 +703,8 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
         return;
     }
 
-    if (try_astc_upload("glTexImage2D", target, level, width, height, border, pixels, pixels_size))
+    if (try_astc_upload("glTexImage2D", target, level, width, height, border, format, type, pixels,
+                        pixels_size))
         return;
 
     fallback_uploads++;
@@ -653,7 +731,8 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
         return;
     }
 
-    if (try_astc_upload("glTexSubImage2D", target, level, width, height, 0, pixels, pixels_size))
+    if (try_astc_upload("glTexSubImage2D", target, level, width, height, 0, format, type, pixels,
+                        pixels_size))
         return;
 
     fallback_uploads++;

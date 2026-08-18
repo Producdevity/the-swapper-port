@@ -75,7 +75,7 @@ else
   source "${controlfolder}/libgl_default.txt"
 fi
 
-if [[ "${DEVICE_ARCH}" != "x86_64" && (-n "${LIBGL_FB:-}" || -n "${LIBGL_ES:-}") ]]; then
+if [ -n "${LIBGL_FB:-}" ] || [ -n "${LIBGL_ES:-}" ]; then
   export SDL_VIDEO_GL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libGL.so.1"
   export SDL_VIDEO_EGL_DRIVER="$GAMEDIR/gl4es.${DEVICE_ARCH}/libEGL.so.1"
 fi

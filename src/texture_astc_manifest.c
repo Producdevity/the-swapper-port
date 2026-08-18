@@ -440,8 +440,7 @@ static enum texture_kind texture_kind_for_path(const char *relative_path,
     if (strstr(relative_path, "#normal") != NULL)
         return pixels >= 262144 ? TEXTURE_NORMAL : TEXTURE_SKIP;
 
-    /* Text rendering is sensitive to filtering and format changes, and the memory win is small.
-     * might revisit this later */
+    /* Text rendering is sensitive to filtering and format changes, and the memory win is small. */
     if (strstr(relative_path, "fonts/") == relative_path ||
         strstr(relative_path, "/fonts/") != NULL)
         return TEXTURE_SKIP;
@@ -451,12 +450,7 @@ static enum texture_kind texture_kind_for_path(const char *relative_path,
     return TEXTURE_COLOR;
 }
 
-static enum texture_kind texture_kind_for_mips_path(const char *relative_path,
-                                                    const struct image *image) {
-    uint64_t pixels = (uint64_t)image->width * image->height;
-
-    if (pixels < 4096)
-        return TEXTURE_SKIP;
+static enum texture_kind texture_kind_for_mips_path(const char *relative_path) {
     if (strstr(relative_path, "#normal") != NULL)
         return TEXTURE_NORMAL;
 
@@ -647,7 +641,7 @@ static int write_raw_mips_entries(FILE *jobs, FILE *manifest, const char *cache_
         image.height = height;
         image.rgba = mips.data + offset;
 
-        kind = texture_kind_for_mips_path(relative_path, &image);
+        kind = texture_kind_for_mips_path(relative_path);
         if (kind != TEXTURE_SKIP) {
             if (snprintf(level_rel, sizeof(level_rel), "%s.level%u", relative_path, level) >=
                 (int)sizeof(level_rel)) {
