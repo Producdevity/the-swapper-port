@@ -54,7 +54,6 @@ The launch script follows the standard PortMaster Mono lifecycle (tasksetter, CF
 - **FMOD compatibility layer** (`libfmodex.so`): translates FMOD audio calls to SDL_mixer, including streaming for large audio assets.
 - **Steam shim** (`libsteam_api.so`): reports Steam as unavailable. Doesn't emulate, bypass ownership, or decrypt tickets.
 - **`MONO_MANAGED_WATCHER=1`**: to prevent a Mono FileSystemWatcher infinite-recursion crash.
-- **gl4es**: bundled for GLES-only CFWs and loaded via `SDL_VIDEO_GL_DRIVER`. PortMaster leaves it unused when a CFW such as ROCKNIX exposes native desktop GL.
 
 ## Additional Resources
 
