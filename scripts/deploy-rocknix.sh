@@ -134,7 +134,6 @@ for required in \
   "$payload/libs.aarch64/libtexture_astc.so" \
   "$payload/tools/setup" \
   "$payload/tools/texture-astc-manifest" \
-  "$payload/tools/texture-downscale" \
   "$payload/tools/xdg-open"; do
   if [ ! -e "$required" ]; then
     echo "Missing package file: $required" >&2
@@ -190,7 +189,7 @@ pids="$(ps w | awk '/[m]ono TheSwapper\.exe/ { print $1 }')"
 [ -n "$pids" ] && kill -KILL $pids 2>/dev/null || true
 
 mv "$ports_dir/The Swapper.sh.tmp" "$ports_dir/The Swapper.sh"
-chmod 755 "$ports_dir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
+chmod 755 "$ports_dir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/xdg-open"
 
 if [ "$reset_setup" = "1" ]; then
   rm -f \
@@ -206,7 +205,7 @@ if [ "$reset_profiles" = "1" ]; then
   cp -f "$gamedir/savedata-seed/"*.pro "$profile_dir/"
 fi
 
-ls -l "$ports_dir/The Swapper.sh" "$gamedir/libs.aarch64/libfmodex.so" "$gamedir/libs.aarch64/libtexture_astc.so" "$gamedir/tools/setup" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
+ls -l "$ports_dir/The Swapper.sh" "$gamedir/libs.aarch64/libfmodex.so" "$gamedir/libs.aarch64/libtexture_astc.so" "$gamedir/tools/setup" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/xdg-open"
 
 if [ ! -f "$gamedir/gamedata/TheSwapper.exe" ]; then
   echo "Note: copy the Steam Windows files into $gamedir/gamedata before launching." >&2

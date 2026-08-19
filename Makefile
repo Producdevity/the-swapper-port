@@ -19,9 +19,7 @@ NATIVE_LIBS := \
   $(LIB_DIR)/libfmodex.so \
   $(LIB_DIR)/libtexture_astc.so
 
-NATIVE_TOOLS := \
-  $(TOOL_DIR)/texture-astc-manifest \
-  $(TOOL_DIR)/texture-downscale
+NATIVE_TOOLS := $(TOOL_DIR)/texture-astc-manifest
 
 all: $(NATIVE_LIBS) $(NATIVE_TOOLS)
 
@@ -49,9 +47,6 @@ $(LIB_DIR)/libtexture_astc.so: src/texture_astc_gl.c | $(LIB_DIR)
 $(TOOL_DIR)/texture-astc-manifest: src/texture_astc_manifest.c | $(TOOL_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
 
-$(TOOL_DIR)/texture-downscale: src/texture_downscale.c | $(TOOL_DIR)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -ldl -lm
-
 package: all
 	rm -rf "$(PACKAGE_DIR)"
 	mkdir -p "$(PORT_DIR)"
@@ -63,7 +58,6 @@ package: all
 	find "$(PACKAGE_DIR)" -name .DS_Store -delete
 	chmod +x "$(PORT_DIR)/theswapper/tools/setup" \
 	  "$(PORT_DIR)/theswapper/tools/texture-astc-manifest" \
-	  "$(PORT_DIR)/theswapper/tools/texture-downscale" \
 	  "$(PORT_DIR)/theswapper/tools/xdg-open"
 
 zip: package

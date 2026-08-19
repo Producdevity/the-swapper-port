@@ -49,8 +49,8 @@ Test all major resolutions:
 
 The launch script follows the standard PortMaster Mono lifecycle (tasksetter, CFW GL configuration via `libgl_${CFW_NAME}.txt`, `pm_finish`). Non-standard elements:
 
-- **First-launch patcher**: uses `utils/patcher.txt` for ASTC texture compression and normal-map downscaling.
-- **Texture compression hook** (`libtexture_astc.so` via `LD_PRELOAD`): substitutes pre-compressed ASTC textures on supported drivers. Mali-G31 Panfrost uses runtime BC3 compression because its advertised native ASTC path crashes when sampled.
+- **First-launch patcher**: uses `utils/patcher.txt` to build the ASTC texture cache without modifying the game assets.
+- **Texture compression hook** (`libtexture_astc.so` via `LD_PRELOAD`): substitutes pre-compressed ASTC textures on supported drivers. Mali-G31 Panfrost uses runtime BC3 compression because its advertised native ASTC path crashes when sampled. On gl4es, alpha-heavy font and TGA detail textures stay uncompressed because its otherwise accepted ASTC upload renders transparent texels as opaque on the Mali blob.
 - **FMOD compatibility layer** (`libfmodex.so`): translates FMOD audio calls to SDL_mixer, including streaming for large audio assets.
 - **Steam shim** (`libsteam_api.so`): reports Steam as unavailable. Doesn't emulate, bypass ownership, or decrypt tickets.
 - **`MONO_MANAGED_WATCHER=1`**: to prevent a Mono FileSystemWatcher infinite-recursion crash.

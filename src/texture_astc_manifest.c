@@ -38,7 +38,24 @@ struct image {
     unsigned char *rgba;
 };
 
-enum texture_kind { TEXTURE_SKIP, TEXTURE_NORMAL, TEXTURE_COLOR };
+struct astc_source {
+    uint64_t hash;
+    uint32_t width;
+    uint32_t height;
+    char block[4];
+    char relative_path[PATH_MAX];
+};
+
+enum texture_kind {
+    TEXTURE_SKIP,
+    TEXTURE_NORMAL,
+    TEXTURE_COLOR,
+    TEXTURE_DETAIL,
+    TEXTURE_FONT
+};
+
+static struct astc_source *astc_sources;
+static size_t astc_source_count;
 
 static int mkdir_p_for_file(const char *path);
 
@@ -48,6 +65,10 @@ static uint32_t read_be32(const unsigned char *p) {
 
 static uint32_t read_le32(const unsigned char *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint16_t read_le16(const unsigned char *p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
 static void write_be32(unsigned char *p, uint32_t value) {
@@ -172,10 +193,13 @@ static int decode_png_rgba8(const char *path, const struct z_api *z, struct imag
     struct buffer png = {0};
     struct buffer idat = {0};
     unsigned char *scanlines = NULL;
+    unsigned char *decoded = NULL;
     z_ulong scanline_size;
     size_t offset = 8;
+    size_t row_size;
     uint32_t width = 0;
     uint32_t height = 0;
+    unsigned int components = 0;
     int result = -1;
 
     memset(image, 0, sizeof(*image));
@@ -201,9 +225,11 @@ static int decode_png_rgba8(const char *path, const struct z_api *z, struct imag
 
             width = read_be32(chunk);
             height = read_be32(chunk + 4);
-            if (width == 0 || height == 0 || chunk[8] != 8 || chunk[9] != 6 || chunk[10] != 0 ||
-                chunk[11] != 0 || chunk[12] != 0)
+            if (width == 0 || height == 0 || chunk[8] != 8 ||
+                (chunk[9] != 2 && chunk[9] != 6) || chunk[10] != 0 || chunk[11] != 0 ||
+                chunk[12] != 0)
                 goto done;
+            components = chunk[9] == 6 ? 4 : 3;
         } else if (memcmp(type, "IDAT", 4) == 0) {
             if (buffer_append(&idat, chunk, length) != 0)
                 goto done;
@@ -214,36 +240,41 @@ static int decode_png_rgba8(const char *path, const struct z_api *z, struct imag
         offset += (size_t)length + 4;
     }
 
-    if (width == 0 || height == 0 || idat.size == 0)
+    if (width == 0 || height == 0 || components == 0 || idat.size == 0)
         goto done;
-    if (width > UINT32_MAX / 4 || height > UINT32_MAX / (width * 4 + 1))
+    if (width > UINT32_MAX / components || width > UINT32_MAX / 4)
         goto done;
 
-    scanline_size = (z_ulong)height * (z_ulong)(width * 4 + 1);
+    row_size = (size_t)width * components;
+    if (height > SIZE_MAX / (row_size + 1) || height > SIZE_MAX / ((size_t)width * 4))
+        goto done;
+
+    scanline_size = (z_ulong)height * (z_ulong)(row_size + 1);
     scanlines = malloc((size_t)scanline_size);
+    decoded = malloc(row_size * height);
     image->rgba = malloc((size_t)width * height * 4);
-    if (scanlines == NULL || image->rgba == NULL)
+    if (scanlines == NULL || decoded == NULL || image->rgba == NULL)
         goto done;
 
     if (z->uncompress(scanlines, &scanline_size, idat.data, (z_ulong)idat.size) != 0)
         goto done;
-    if (scanline_size != (z_ulong)height * (z_ulong)(width * 4 + 1))
+    if (scanline_size != (z_ulong)height * (z_ulong)(row_size + 1))
         goto done;
 
     for (uint32_t y = 0; y < height; y++) {
-        const unsigned char *src = scanlines + (size_t)y * (width * 4 + 1);
-        unsigned char *dst = image->rgba + (size_t)y * width * 4;
-        const unsigned char *prev = y == 0 ? NULL : image->rgba + (size_t)(y - 1) * width * 4;
+        const unsigned char *src = scanlines + (size_t)y * (row_size + 1);
+        unsigned char *dst = decoded + (size_t)y * row_size;
+        const unsigned char *prev = y == 0 ? NULL : decoded + (size_t)(y - 1) * row_size;
         int filter = src[0];
 
         src++;
         if (filter < 0 || filter > 4)
             goto done;
 
-        for (uint32_t x = 0; x < width * 4; x++) {
-            int left = x >= 4 ? dst[x - 4] : 0;
+        for (size_t x = 0; x < row_size; x++) {
+            int left = x >= components ? dst[x - components] : 0;
             int up = prev == NULL ? 0 : prev[x];
-            int up_left = (prev != NULL && x >= 4) ? prev[x - 4] : 0;
+            int up_left = (prev != NULL && x >= components) ? prev[x - components] : 0;
             int value = src[x];
 
             switch (filter) {
@@ -267,6 +298,16 @@ static int decode_png_rgba8(const char *path, const struct z_api *z, struct imag
         }
     }
 
+    for (uint64_t i = 0; i < (uint64_t)width * height; i++) {
+        const unsigned char *src = decoded + i * components;
+        unsigned char *dst = image->rgba + i * 4;
+
+        dst[0] = src[0];
+        dst[1] = src[1];
+        dst[2] = src[2];
+        dst[3] = components == 4 ? src[3] : 255;
+    }
+
     image->width = width;
     image->height = height;
     result = 0;
@@ -276,9 +317,73 @@ done:
         free(image->rgba);
         memset(image, 0, sizeof(*image));
     }
+    free(decoded);
     free(scanlines);
     buffer_free(&idat);
     buffer_free(&png);
+    return result;
+}
+
+static int decode_tga_rgba8(const char *path, struct image *image) {
+    struct buffer tga = {0};
+    size_t offset;
+    size_t pixel_size;
+    uint32_t width;
+    uint32_t height;
+    unsigned int components;
+    int top_origin;
+    int right_origin;
+    int result = -1;
+
+    memset(image, 0, sizeof(*image));
+    if (read_file(path, &tga) != 0)
+        return -1;
+    if (tga.size < 18 || tga.data[1] != 0 || tga.data[2] != 2)
+        goto done;
+
+    width = read_le16(tga.data + 12);
+    height = read_le16(tga.data + 14);
+    components = tga.data[16] == 32 ? 4 : tga.data[16] == 24 ? 3 : 0;
+    if (width == 0 || height == 0 || components == 0 || width > UINT32_MAX / 4 ||
+        height > SIZE_MAX / ((size_t)width * 4)) {
+        goto done;
+    }
+
+    offset = 18 + tga.data[0];
+    pixel_size = (size_t)width * height * components;
+    if (offset > tga.size || pixel_size > tga.size - offset)
+        goto done;
+
+    image->rgba = malloc((size_t)width * height * 4);
+    if (image->rgba == NULL)
+        goto done;
+
+    top_origin = (tga.data[17] & 0x20) != 0;
+    right_origin = (tga.data[17] & 0x10) != 0;
+    for (uint32_t y = 0; y < height; y++) {
+        uint32_t dst_y = top_origin ? y : height - 1 - y;
+        for (uint32_t x = 0; x < width; x++) {
+            uint32_t dst_x = right_origin ? width - 1 - x : x;
+            const unsigned char *src = tga.data + offset + ((size_t)y * width + x) * components;
+            unsigned char *dst = image->rgba + ((size_t)dst_y * width + dst_x) * 4;
+
+            dst[0] = src[2];
+            dst[1] = src[1];
+            dst[2] = src[0];
+            dst[3] = components == 4 ? src[3] : 255;
+        }
+    }
+
+    image->width = width;
+    image->height = height;
+    result = 0;
+
+done:
+    if (result != 0) {
+        free(image->rgba);
+        memset(image, 0, sizeof(*image));
+    }
+    buffer_free(&tga);
     return result;
 }
 
@@ -430,31 +535,31 @@ static int path_join(char *out, size_t out_size, const char *left, const char *r
     return written > 0 && (size_t)written < out_size;
 }
 
+static int is_detail_texture(const char *relative_path) {
+    return has_suffix(relative_path, ".tga");
+}
+
 static enum texture_kind texture_kind_for_path(const char *relative_path,
                                                const struct image *image) {
     uint64_t pixels = (uint64_t)image->width * image->height;
 
-    if (!has_suffix(relative_path, ".png"))
-        return TEXTURE_SKIP;
-
     if (strstr(relative_path, "#normal") != NULL)
-        return pixels >= 262144 ? TEXTURE_NORMAL : TEXTURE_SKIP;
+        return pixels >= 16384 ? TEXTURE_NORMAL : TEXTURE_SKIP;
 
-    /* Text rendering is sensitive to filtering and format changes, and the memory win is small. */
     if (strstr(relative_path, "fonts/") == relative_path ||
         strstr(relative_path, "/fonts/") != NULL)
-        return TEXTURE_SKIP;
-    if (pixels < 262144)
+        return pixels >= 262144 ? TEXTURE_FONT : TEXTURE_SKIP;
+    if (pixels < 65536)
         return TEXTURE_SKIP;
 
-    return TEXTURE_COLOR;
+    return is_detail_texture(relative_path) ? TEXTURE_DETAIL : TEXTURE_COLOR;
 }
 
 static enum texture_kind texture_kind_for_mips_path(const char *relative_path) {
     if (strstr(relative_path, "#normal") != NULL)
         return TEXTURE_NORMAL;
 
-    return TEXTURE_COLOR;
+    return is_detail_texture(relative_path) ? TEXTURE_DETAIL : TEXTURE_COLOR;
 }
 
 static int mkdir_p_for_file(const char *path) {
@@ -476,36 +581,90 @@ static int mkdir_p_for_file(const char *path) {
     return 0;
 }
 
+static const char *find_astc_source(uint64_t hash, uint32_t width, uint32_t height,
+                                    const char *block) {
+    for (size_t i = 0; i < astc_source_count; i++) {
+        const struct astc_source *source = &astc_sources[i];
+
+        if (source->hash == hash && source->width == width && source->height == height &&
+            strcmp(source->block, block) == 0) {
+            return source->relative_path;
+        }
+    }
+
+    return NULL;
+}
+
+static int remember_astc_source(uint64_t hash, uint32_t width, uint32_t height, const char *block,
+                                const char *relative_path) {
+    struct astc_source *sources;
+    struct astc_source *source;
+
+    if (strlen(block) >= sizeof(astc_sources[0].block) ||
+        strlen(relative_path) >= sizeof(astc_sources[0].relative_path)) {
+        return -1;
+    }
+
+    sources = realloc(astc_sources, (astc_source_count + 1) * sizeof(*astc_sources));
+    if (sources == NULL)
+        return -1;
+
+    astc_sources = sources;
+    source = &astc_sources[astc_source_count++];
+    source->hash = hash;
+    source->width = width;
+    source->height = height;
+    strcpy(source->block, block);
+    strcpy(source->relative_path, relative_path);
+    return 0;
+}
+
 static int write_entry(FILE *jobs, FILE *manifest, const char *source_path, const char *cache_dir,
                        const char *relative_path, const struct image *image,
                        enum texture_kind kind) {
     char astc_rel[PATH_MAX];
     char astc_path[PATH_MAX];
-    const char *block = kind == TEXTURE_COLOR ? "8x8" : "6x6";
+    const char *block = kind == TEXTURE_COLOR ? "8x8" : kind == TEXTURE_FONT ? "4x4" : "6x6";
     const char *profile = "-cl";
-    const char *gl_format = kind == TEXTURE_COLOR ? "0x93B7" : "0x93B4";
-    const char *kind_name = kind == TEXTURE_NORMAL ? "normal" : "color";
+    const char *gl_format =
+        kind == TEXTURE_COLOR ? "0x93B7" : kind == TEXTURE_FONT ? "0x93B0" : "0x93B4";
+    const char *kind_name = kind == TEXTURE_NORMAL   ? "normal"
+                            : kind == TEXTURE_FONT   ? "font"
+                            : kind == TEXTURE_DETAIL ? "detail"
+                                                     : "color";
     uint64_t rgba_hash = hash_rgba(image);
     uint64_t bgra_hash = hash_bgra(image);
     uint64_t rgb_hash = hash_rgb(image);
+    const char *selected_astc_rel = find_astc_source(rgba_hash, image->width, image->height, block);
 
-    if (snprintf(astc_rel, sizeof(astc_rel), "%s.astc", relative_path) >= (int)sizeof(astc_rel))
-        return -1;
-    if (!path_join(astc_path, sizeof(astc_path), cache_dir, astc_rel))
-        return -1;
-    if (mkdir_p_for_file(astc_path) != 0)
-        return -1;
+    if (selected_astc_rel == NULL) {
+        if (snprintf(astc_rel, sizeof(astc_rel), "%s.astc", relative_path) >=
+            (int)sizeof(astc_rel)) {
+            return -1;
+        }
+        if (!path_join(astc_path, sizeof(astc_path), cache_dir, astc_rel))
+            return -1;
+        if (mkdir_p_for_file(astc_path) != 0)
+            return -1;
 
-    fprintf(jobs, "%s\t%s\t%s\t%s\t%s\t%u\t%u\t%s\n", source_path, astc_path, profile, block,
-            kind_name, image->width, image->height, relative_path);
+        fprintf(jobs, "%s\t%s\t%s\t%s\t%s\t%u\t%u\t%s\n", source_path, astc_path, profile,
+                block, kind_name, image->width, image->height, relative_path);
+        if (remember_astc_source(rgba_hash, image->width, image->height, block, astc_rel) != 0)
+            return -1;
+        selected_astc_rel = astc_sources[astc_source_count - 1].relative_path;
+    }
+
     /* The runtime hook only sees decoded upload bytes, so match the layouts the game may pass to
      * GL. */
     fprintf(manifest, "%016llx\t%u\t%u\t%s\t%s\t%s\t%s\t%s\n", (unsigned long long)rgba_hash,
-            image->width, image->height, gl_format, astc_rel, kind_name, relative_path, "rgba");
+            image->width, image->height, gl_format, selected_astc_rel, kind_name, relative_path,
+            "rgba");
     fprintf(manifest, "%016llx\t%u\t%u\t%s\t%s\t%s\t%s\t%s\n", (unsigned long long)bgra_hash,
-            image->width, image->height, gl_format, astc_rel, kind_name, relative_path, "bgra");
+            image->width, image->height, gl_format, selected_astc_rel, kind_name, relative_path,
+            "bgra");
     fprintf(manifest, "%016llx\t%u\t%u\t%s\t%s\t%s\t%s\t%s\n", (unsigned long long)rgb_hash,
-            image->width, image->height, gl_format, astc_rel, kind_name, relative_path, "rgb");
+            image->width, image->height, gl_format, selected_astc_rel, kind_name, relative_path,
+            "rgb");
     return 0;
 }
 
@@ -713,12 +872,17 @@ static int walk_textures(const char *textures_dir, const char *cache_dir, const 
                 closedir(dir);
                 return -1;
             }
-        } else if (S_ISREG(st.st_mode) && has_suffix(entry->d_name, ".png")) {
+        } else if (S_ISREG(st.st_mode) &&
+                   (has_suffix(entry->d_name, ".png") || has_suffix(entry->d_name, ".tga"))) {
             struct image image = {0};
             enum texture_kind kind;
 
-            if (decode_png_rgba8(child_path, z, &image) != 0)
+            if (has_suffix(entry->d_name, ".png")) {
+                if (decode_png_rgba8(child_path, z, &image) != 0)
+                    continue;
+            } else if (decode_tga_rgba8(child_path, &image) != 0) {
                 continue;
+            }
 
             kind = texture_kind_for_path(child_rel, &image);
             if (kind != TEXTURE_SKIP) {
@@ -789,5 +953,6 @@ done:
         fclose(manifest);
     if (z.handle != NULL)
         dlclose(z.handle);
+    free(astc_sources);
     return result;
 }

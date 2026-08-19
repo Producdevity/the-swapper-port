@@ -52,6 +52,7 @@ struct astc_entry {
     int width;
     int height;
     unsigned int internal_format;
+    int gl4es_unsafe;
     char path[PATH_MAX];
 };
 
@@ -291,6 +292,7 @@ static void load_manifest(void) {
         char *height_text = strtok(NULL, "\t\r\n");
         char *format_text = strtok(NULL, "\t\r\n");
         char *path_text = strtok(NULL, "\t\r\n");
+        char *kind_text = strtok(NULL, "\t\r\n");
         struct astc_entry entry;
         unsigned int width;
         unsigned int height;
@@ -309,6 +311,9 @@ static void load_manifest(void) {
 
         entry.width = (int)width;
         entry.height = (int)height;
+        entry.gl4es_unsafe = kind_text != NULL &&
+                             (strcmp(kind_text, "font") == 0 ||
+                              strcmp(kind_text, "detail") == 0);
         if (snprintf(entry.path, sizeof(entry.path), "%s/%s", cache_dir, path_text) >=
             (int)sizeof(entry.path)) {
             continue;
@@ -592,16 +597,21 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
         return 0;
     }
 
+    const char *gl_driver = getenv("SDL_VIDEO_GL_DRIVER");
+    /* gl4es accepts alpha-heavy font and detail ASTC uploads but samples transparent texels as
+     * opaque on the Mali blob. */
+    if (entry->gl4es_unsafe && gl_driver != NULL && strstr(gl_driver, "gl4es") != NULL)
+        return 0;
+
     matched_uploads++;
     if (use_panfrost_bc3_fallback()) {
-        /* G31 Panfrost advertises ASTC but crashes when sampling it. Keep every matched upload
-         * off that path; subimages can use the original uncompressed update API. */
+        /* Compressed subimage updates are not portable; keep them on the original path. */
         if (strcmp(api, "glTexImage2D") != 0)
             return 0;
 
         if (env_enabled("SWAPPER_ASTC_DEBUG")) {
             fprintf(stderr,
-                    "SwapperASTC: Panfrost BC3 call level=%d width=%d height=%d "
+                    "SwapperASTC: BC3 call level=%d width=%d height=%d "
                     "hash=%016llx path=%s\n",
                     level, width, height, (unsigned long long)hash, entry->path);
             fflush(stderr);
@@ -614,7 +624,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
             replaced_uploads++;
             if (env_enabled("SWAPPER_ASTC_DEBUG")) {
                 fprintf(stderr,
-                        "SwapperASTC: Panfrost BC3 accepted level=%d width=%d height=%d "
+                        "SwapperASTC: BC3 accepted level=%d width=%d height=%d "
                         "hash=%016llx\n",
                         level, width, height, (unsigned long long)hash);
             }
@@ -624,7 +634,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
         failed_uploads++;
         if (env_enabled("SWAPPER_ASTC_DEBUG")) {
             fprintf(stderr,
-                    "SwapperASTC: Panfrost BC3 rejected level=%d width=%d height=%d "
+                    "SwapperASTC: BC3 rejected level=%d width=%d height=%d "
                     "hash=%016llx error=0x%x\n",
                     level, width, height, (unsigned long long)hash, error);
         }

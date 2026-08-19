@@ -23,8 +23,8 @@ directory.
 
 The game is a .NET Framework 4 assembly. The port runs it through PortMaster's
 Mono runtime and supplies native Linux replacements for the Windows-only native
-libraries used by the game. Some assets are downscaled and/or compressed to fit
-in memory.
+libraries used by the game. A runtime texture hook uses a compressed cache to
+reduce graphics memory use without modifying the game assets.
 
 ## Layout
 
@@ -119,13 +119,12 @@ scripts/deploy-muos.sh <ssh-host>
 ```
 
 Set `SWAPPER_RESET_SETUP=1` to force the first-launch setup step to run again on
-the next launch. Use in combination with `SWAPPER_GAMEFILES_DIR` to avoid issues
-where files already have been partially patched.
+the next launch and rebuild the compressed texture cache.
 
 ## First Launch
 
 The launcher uses PortMaster's patcher UI for first-run setup. The setup step
-validates the game files, installs the Mono DLL map, downscales selected texture
-assets in the user's local `gamedata` copy, seeds a low-spec profile if no
-profile exists yet, and marks setup complete. The seeded profile disables the
-improved graphics settings to reduce memory use on 1 GB devices.
+validates the game files, installs the Mono DLL map, builds the compressed
+texture cache, seeds a low-spec profile if no profile exists yet, and marks
+setup complete. The seeded profile disables the improved graphics settings to
+reduce memory use on 1 GB devices.

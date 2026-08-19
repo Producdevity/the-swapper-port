@@ -18,5 +18,4 @@ file build/libs.aarch64/libwindows_stub.so \
   build/libs.aarch64/libsdkencryptedappticket.so \
   build/libs.aarch64/libfmodex.so \
   build/libs.aarch64/libtexture_astc.so \
-  build/tools.aarch64/texture-astc-manifest \
-  build/tools.aarch64/texture-downscale
+  build/tools.aarch64/texture-astc-manifest
