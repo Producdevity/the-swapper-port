@@ -77,6 +77,12 @@ Deploy to a ROCKNIX device:
 scripts/deploy-rocknix.sh <ssh-host>
 ```
 
+Deploy to an AmberELEC device:
+
+```bash
+scripts/deploy-amberelec.sh <ssh-host>
+```
+
 Deploy to an AArch64 dArkOS device:
 
 ```bash
@@ -90,6 +96,7 @@ autoinstall folder:
 scripts/deploy-muos.sh --autoinstall <ssh-host>
 scripts/deploy-knulli.sh --autoinstall <ssh-host>
 scripts/deploy-rocknix.sh --autoinstall <ssh-host>
+scripts/deploy-amberelec.sh --autoinstall <ssh-host>
 scripts/deploy-darkos.sh --autoinstall <ssh-host>
 ```
 
@@ -97,13 +104,15 @@ Then open PortMaster on the device. PortMaster will install the zip and update
 the frontend metadata.
 
 The deploy scripts use the standard single-card PortMaster paths by default.
-The Knulli, ROCKNIX, and dArkOS helpers also accept explicit directories for a two-SD-card setup:
+The Knulli, ROCKNIX, AmberELEC, and dArkOS helpers also accept explicit directories for a two-SD-card setup:
 
 ```bash
 scripts/deploy-knulli.sh --ports-dir /userdata/roms/ports <ssh-host>
 scripts/deploy-knulli.sh --autoinstall-dir /userdata/system/.local/share/PortMaster/autoinstall <ssh-host>
 scripts/deploy-rocknix.sh --ports-dir /storage/roms/ports <ssh-host>
 scripts/deploy-rocknix.sh --autoinstall-dir /storage/roms/ports/PortMaster/autoinstall <ssh-host>
+scripts/deploy-amberelec.sh --ports-dir /storage/roms/ports <ssh-host>
+scripts/deploy-amberelec.sh --autoinstall-dir /storage/roms/ports/PortMaster/autoinstall <ssh-host>
 scripts/deploy-darkos.sh --ports-dir /roms/ports <ssh-host>
 scripts/deploy-darkos.sh --autoinstall-dir /roms/tools/PortMaster/autoinstall <ssh-host>
 ```
