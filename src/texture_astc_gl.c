@@ -18,6 +18,7 @@
 #define GL_UNSIGNED_BYTE 0x1401
 #define GL_RENDERER 0x1F01
 #define GL_VERSION 0x1F02
+#define GL_UNPACK_ALIGNMENT 0x0CF5
 
 typedef unsigned int GLenum;
 typedef int GLint;
@@ -33,6 +34,7 @@ typedef void (*gl_tex_storage_2d_fn)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
 typedef void (*gl_renderbuffer_storage_fn)(GLenum, GLenum, GLsizei, GLsizei);
 typedef const GLubyte *(*gl_get_string_fn)(GLenum);
 typedef GLenum (*gl_get_error_fn)(void);
+typedef void (*gl_get_integerv_fn)(GLenum, GLint *);
 typedef void *(*get_proc_address_fn)(const char *);
 
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height,
@@ -83,6 +85,7 @@ static gl_tex_storage_2d_fn real_gl_tex_storage_2d;
 static gl_renderbuffer_storage_fn real_gl_renderbuffer_storage;
 static gl_get_string_fn real_gl_get_string;
 static gl_get_error_fn real_gl_get_error;
+static gl_get_integerv_fn real_gl_get_integerv;
 static get_proc_address_fn real_sdl_gl_get_proc_address;
 static get_proc_address_fn real_glx_get_proc_address;
 static get_proc_address_fn real_glx_get_proc_address_arb;
@@ -179,17 +182,6 @@ static int env_enabled(const char *name) {
     return value != NULL && strcmp(value, "1") == 0;
 }
 
-static uint64_t fnv1a64(const unsigned char *data, size_t size) {
-    uint64_t hash = 1469598103934665603ULL;
-
-    for (size_t i = 0; i < size; i++) {
-        hash ^= data[i];
-        hash *= 1099511628211ULL;
-    }
-
-    return hash;
-}
-
 static void *resolve_symbol(const char *name) {
     void *symbol = real_dlsym(RTLD_NEXT, name);
 
@@ -235,6 +227,8 @@ static void resolve_gl(void) {
         real_gl_get_string = (gl_get_string_fn)resolve_symbol("glGetString");
     if (real_gl_get_error == NULL)
         real_gl_get_error = (gl_get_error_fn)resolve_symbol("glGetError");
+    if (real_gl_get_integerv == NULL)
+        real_gl_get_integerv = (gl_get_integerv_fn)resolve_symbol("glGetIntegerv");
 }
 
 static int parse_hex64(const char *value, uint64_t *out) {
@@ -567,8 +561,10 @@ static int astc_payload(const unsigned char *data, size_t size, int width, int h
     return 0;
 }
 
-static size_t pixel_size(GLenum format, GLenum type, GLsizei width, GLsizei height) {
+static size_t pixel_layout(GLenum format, GLenum type, GLsizei width, GLsizei height,
+                           size_t *row_bytes, size_t *row_stride) {
     size_t components;
+    size_t alignment = 4;
 
     if (type != GL_UNSIGNED_BYTE || width <= 0 || height <= 0)
         return 0;
@@ -580,7 +576,43 @@ static size_t pixel_size(GLenum format, GLenum type, GLsizei width, GLsizei heig
     else
         return 0;
 
-    return (size_t)width * (size_t)height * components;
+    if ((size_t)width > SIZE_MAX / components)
+        return 0;
+
+    *row_bytes = (size_t)width * components;
+    if (real_gl_get_integerv != NULL) {
+        GLint queried_alignment = 0;
+
+        real_gl_get_integerv(GL_UNPACK_ALIGNMENT, &queried_alignment);
+        if (queried_alignment == 1 || queried_alignment == 2 || queried_alignment == 4 ||
+            queried_alignment == 8) {
+            alignment = (size_t)queried_alignment;
+        }
+    }
+
+    if (*row_bytes > SIZE_MAX - (alignment - 1))
+        return 0;
+    *row_stride = (*row_bytes + alignment - 1) & ~(alignment - 1);
+    if ((size_t)(height - 1) > (SIZE_MAX - *row_bytes) / *row_stride)
+        return 0;
+
+    return (size_t)(height - 1) * *row_stride + *row_bytes;
+}
+
+static uint64_t hash_pixel_rows(const unsigned char *pixels, size_t row_bytes, size_t row_stride,
+                                GLsizei height) {
+    uint64_t hash = 1469598103934665603ULL;
+
+    for (GLsizei row = 0; row < height; row++) {
+        const unsigned char *data = pixels + (size_t)row * row_stride;
+
+        for (size_t i = 0; i < row_bytes; i++) {
+            hash ^= data[i];
+            hash *= 1099511628211ULL;
+        }
+    }
+
+    return hash;
 }
 
 static void log_compressed_call(const char *api, const char *method, GLint level, GLsizei width,
@@ -599,7 +631,8 @@ static void log_compressed_call(const char *api, const char *method, GLint level
 
 static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei width,
                            GLsizei height, GLint border, GLenum format, GLenum type,
-                           const void *pixels, size_t pixels_size) {
+                           const void *pixels, size_t pixels_size, size_t row_bytes,
+                           size_t row_stride) {
     uint64_t hash;
     const struct astc_entry *entry;
     int gl4es_unsafe = 0;
@@ -609,7 +642,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
 
     log_startup_once();
     candidate_uploads++;
-    hash = fnv1a64((const unsigned char *)pixels, pixels_size);
+    hash = hash_pixel_rows((const unsigned char *)pixels, row_bytes, row_stride, height);
     entry = find_entry(hash, width, height, format, &gl4es_unsafe);
     if (entry == NULL) {
         if (env_enabled("SWAPPER_ASTC_DEBUG") &&
@@ -723,12 +756,14 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height,
                   GLint border, GLenum format, GLenum type, const void *pixels) {
     size_t pixels_size;
+    size_t row_bytes = 0;
+    size_t row_stride = 0;
 
     resolve_gl();
     if (real_gl_tex_image_2d == NULL)
         return;
 
-    pixels_size = pixel_size(format, type, width, height);
+    pixels_size = pixel_layout(format, type, width, height, &row_bytes, &row_stride);
     log_upload_debug("glTexImage2D", level, internalformat, width, height, format, type, pixels,
                      pixels_size);
     log_large_allocation("glTexImage2D", width, height, internalformat, format, type, pixels,
@@ -741,7 +776,7 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
     }
 
     if (try_astc_upload("glTexImage2D", target, level, width, height, border, format, type, pixels,
-                        pixels_size))
+                        pixels_size, row_bytes, row_stride))
         return;
 
     fallback_uploads++;
@@ -752,12 +787,14 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
 void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
                      GLsizei height, GLenum format, GLenum type, const void *pixels) {
     size_t pixels_size;
+    size_t row_bytes = 0;
+    size_t row_stride = 0;
 
     resolve_gl();
     if (real_gl_tex_sub_image_2d == NULL)
         return;
 
-    pixels_size = pixel_size(format, type, width, height);
+    pixels_size = pixel_layout(format, type, width, height, &row_bytes, &row_stride);
     log_upload_debug("glTexSubImage2D", level, 0, width, height, format, type, pixels, pixels_size);
     log_large_allocation("glTexSubImage2D", width, height, 0, format, type, pixels, pixels_size);
     if (target != GL_TEXTURE_2D || xoffset != 0 || yoffset != 0 || pixels == NULL ||
@@ -769,7 +806,7 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
     }
 
     if (try_astc_upload("glTexSubImage2D", target, level, width, height, 0, format, type, pixels,
-                        pixels_size))
+                        pixels_size, row_bytes, row_stride))
         return;
 
     fallback_uploads++;
