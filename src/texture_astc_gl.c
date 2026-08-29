@@ -18,6 +18,9 @@
 #define GL_UNSIGNED_BYTE 0x1401
 #define GL_RENDERER 0x1F01
 #define GL_VERSION 0x1F02
+#define GL_UNPACK_ROW_LENGTH 0x0CF2
+#define GL_UNPACK_SKIP_ROWS 0x0CF3
+#define GL_UNPACK_SKIP_PIXELS 0x0CF4
 #define GL_UNPACK_ALIGNMENT 0x0CF5
 
 typedef unsigned int GLenum;
@@ -65,6 +68,7 @@ static int initialized;
 static int astc_advertised = -1;
 static int astc_disabled;
 static int panfrost_bc3_fallback = -1;
+static int unpack_subimage_supported = -1;
 static int startup_logged;
 static int first_result_logged;
 static char cache_dir[PATH_MAX];
@@ -561,42 +565,129 @@ static int astc_payload(const unsigned char *data, size_t size, int width, int h
     return 0;
 }
 
-static size_t pixel_layout(GLenum format, GLenum type, GLsizei width, GLsizei height,
-                           size_t *row_bytes, size_t *row_stride) {
-    size_t components;
-    size_t alignment = 4;
+struct pixel_layout {
+    size_t row_bytes;
+    size_t row_stride;
+    size_t pixel_offset;
+    size_t total_size;
+};
 
-    if (type != GL_UNSIGNED_BYTE || width <= 0 || height <= 0)
+static size_t pixel_components(GLenum format, GLenum type) {
+    if (type != GL_UNSIGNED_BYTE)
         return 0;
 
     if (format == GL_RGBA || format == GL_BGRA)
-        components = 4;
-    else if (format == GL_RGB)
-        components = 3;
-    else
+        return 4;
+    if (format == GL_RGB)
+        return 3;
+
+    return 0;
+}
+
+static int supports_unpack_subimage(void) {
+    const char *version;
+    const char *extensions;
+    int major = 0;
+    int minor = 0;
+
+    if (unpack_subimage_supported >= 0)
+        return unpack_subimage_supported;
+
+    unpack_subimage_supported = 0;
+    if (real_gl_get_string == NULL)
         return 0;
 
-    if ((size_t)width > SIZE_MAX / components)
+    version = (const char *)real_gl_get_string(GL_VERSION);
+    if (version == NULL)
         return 0;
 
-    *row_bytes = (size_t)width * components;
-    if (real_gl_get_integerv != NULL) {
-        GLint queried_alignment = 0;
-
-        real_gl_get_integerv(GL_UNPACK_ALIGNMENT, &queried_alignment);
-        if (queried_alignment == 1 || queried_alignment == 2 || queried_alignment == 4 ||
-            queried_alignment == 8) {
-            alignment = (size_t)queried_alignment;
-        }
+    if (sscanf(version, "OpenGL ES %d.%d", &major, &minor) != 2) {
+        unpack_subimage_supported = 1;
+        return 1;
+    }
+    if (major >= 3) {
+        unpack_subimage_supported = 1;
+        return 1;
     }
 
-    if (*row_bytes > SIZE_MAX - (alignment - 1))
-        return 0;
-    *row_stride = (*row_bytes + alignment - 1) & ~(alignment - 1);
-    if ((size_t)(height - 1) > (SIZE_MAX - *row_bytes) / *row_stride)
+    extensions = (const char *)real_gl_get_string(GL_EXTENSIONS);
+    unpack_subimage_supported =
+        extensions != NULL && extension_contains(extensions, "GL_EXT_unpack_subimage");
+    return unpack_subimage_supported;
+}
+
+static size_t tight_pixel_size(GLenum format, GLenum type, GLsizei width, GLsizei height) {
+    size_t components;
+
+    if (width <= 0 || height <= 0)
         return 0;
 
-    return (size_t)(height - 1) * *row_stride + *row_bytes;
+    components = pixel_components(format, type);
+    if (components == 0 || (size_t)width > SIZE_MAX / components)
+        return 0;
+    if ((size_t)height > SIZE_MAX / ((size_t)width * components))
+        return 0;
+
+    return (size_t)width * components * (size_t)height;
+}
+
+static int query_pixel_layout(GLenum format, GLenum type, GLsizei width, GLsizei height,
+                              struct pixel_layout *layout) {
+    size_t components;
+    size_t row_pixels;
+    size_t alignment = 4;
+    GLint queried_alignment = 0;
+    GLint row_length = 0;
+    GLint skip_pixels = 0;
+    GLint skip_rows = 0;
+
+    if (width <= 0 || height <= 0 || real_gl_get_integerv == NULL)
+        return 0;
+
+    components = pixel_components(format, type);
+    if (components == 0 || (size_t)width > SIZE_MAX / components)
+        return 0;
+
+    real_gl_get_integerv(GL_UNPACK_ALIGNMENT, &queried_alignment);
+    if (queried_alignment != 1 && queried_alignment != 2 && queried_alignment != 4 &&
+        queried_alignment != 8) {
+        return 0;
+    }
+    alignment = (size_t)queried_alignment;
+
+    if (supports_unpack_subimage()) {
+        real_gl_get_integerv(GL_UNPACK_ROW_LENGTH, &row_length);
+        real_gl_get_integerv(GL_UNPACK_SKIP_PIXELS, &skip_pixels);
+        real_gl_get_integerv(GL_UNPACK_SKIP_ROWS, &skip_rows);
+        if (row_length < 0 || skip_pixels < 0 || skip_rows < 0)
+            return 0;
+    }
+
+    layout->row_bytes = (size_t)width * components;
+    row_pixels = row_length > 0 ? (size_t)row_length : (size_t)width;
+    if (row_pixels > SIZE_MAX / components)
+        return 0;
+    layout->row_stride = row_pixels * components;
+    if (layout->row_stride > SIZE_MAX - (alignment - 1))
+        return 0;
+    layout->row_stride = (layout->row_stride + alignment - 1) & ~(alignment - 1);
+
+    if ((size_t)skip_rows > SIZE_MAX / layout->row_stride ||
+        (size_t)skip_pixels > SIZE_MAX / components) {
+        return 0;
+    }
+    layout->pixel_offset = (size_t)skip_rows * layout->row_stride;
+    if (layout->pixel_offset > SIZE_MAX - (size_t)skip_pixels * components)
+        return 0;
+    layout->pixel_offset += (size_t)skip_pixels * components;
+
+    if ((size_t)(height - 1) > (SIZE_MAX - layout->row_bytes) / layout->row_stride)
+        return 0;
+    layout->total_size = (size_t)(height - 1) * layout->row_stride + layout->row_bytes;
+    if (layout->pixel_offset > SIZE_MAX - layout->total_size)
+        return 0;
+    layout->total_size += layout->pixel_offset;
+    return 1;
 }
 
 static uint64_t hash_pixel_rows(const unsigned char *pixels, size_t row_bytes, size_t row_stride,
@@ -631,28 +722,31 @@ static void log_compressed_call(const char *api, const char *method, GLint level
 
 static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei width,
                            GLsizei height, GLint border, GLenum format, GLenum type,
-                           const void *pixels, size_t pixels_size, size_t row_bytes,
-                           size_t row_stride) {
+                           const void *pixels) {
     uint64_t hash;
     const struct astc_entry *entry;
+    struct pixel_layout layout;
     int gl4es_unsafe = 0;
 
-    if (!can_try_astc() || !has_candidate_dimension(width, height))
+    if (!has_candidate_dimension(width, height) || !can_try_astc())
+        return 0;
+    if (!query_pixel_layout(format, type, width, height, &layout))
         return 0;
 
     log_startup_once();
     candidate_uploads++;
-    hash = hash_pixel_rows((const unsigned char *)pixels, row_bytes, row_stride, height);
+    hash = hash_pixel_rows((const unsigned char *)pixels + layout.pixel_offset, layout.row_bytes,
+                           layout.row_stride, height);
     entry = find_entry(hash, width, height, format, &gl4es_unsafe);
     if (entry == NULL) {
         if (env_enabled("SWAPPER_ASTC_DEBUG") &&
-            (candidate_miss_debug_count < 32 || pixels_size >= 1024 * 1024)) {
+            (candidate_miss_debug_count < 32 || layout.total_size >= 1024 * 1024)) {
             if (candidate_miss_debug_count < 32)
                 candidate_miss_debug_count++;
             fprintf(stderr,
                     "SwapperASTC: candidate miss %s level=%d width=%d height=%d hash=%016llx "
                     "bytes=%zu\n",
-                    api, level, width, height, (unsigned long long)hash, pixels_size);
+                    api, level, width, height, (unsigned long long)hash, layout.total_size);
         }
         return 0;
     }
@@ -728,7 +822,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
         if (error == GL_NO_ERROR) {
             replaced_uploads++;
             if (env_enabled("SWAPPER_ASTC_DEBUG") &&
-                (replacement_debug_count < 32 || pixels_size >= 1024 * 1024)) {
+                (replacement_debug_count < 32 || layout.total_size >= 1024 * 1024)) {
                 if (replacement_debug_count < 32)
                     replacement_debug_count++;
                 fprintf(stderr,
@@ -756,14 +850,12 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
 void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height,
                   GLint border, GLenum format, GLenum type, const void *pixels) {
     size_t pixels_size;
-    size_t row_bytes = 0;
-    size_t row_stride = 0;
 
     resolve_gl();
     if (real_gl_tex_image_2d == NULL)
         return;
 
-    pixels_size = pixel_layout(format, type, width, height, &row_bytes, &row_stride);
+    pixels_size = tight_pixel_size(format, type, width, height);
     log_upload_debug("glTexImage2D", level, internalformat, width, height, format, type, pixels,
                      pixels_size);
     log_large_allocation("glTexImage2D", width, height, internalformat, format, type, pixels,
@@ -775,8 +867,7 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
         return;
     }
 
-    if (try_astc_upload("glTexImage2D", target, level, width, height, border, format, type, pixels,
-                        pixels_size, row_bytes, row_stride))
+    if (try_astc_upload("glTexImage2D", target, level, width, height, border, format, type, pixels))
         return;
 
     fallback_uploads++;
@@ -787,14 +878,12 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei widt
 void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
                      GLsizei height, GLenum format, GLenum type, const void *pixels) {
     size_t pixels_size;
-    size_t row_bytes = 0;
-    size_t row_stride = 0;
 
     resolve_gl();
     if (real_gl_tex_sub_image_2d == NULL)
         return;
 
-    pixels_size = pixel_layout(format, type, width, height, &row_bytes, &row_stride);
+    pixels_size = tight_pixel_size(format, type, width, height);
     log_upload_debug("glTexSubImage2D", level, 0, width, height, format, type, pixels, pixels_size);
     log_large_allocation("glTexSubImage2D", width, height, 0, format, type, pixels, pixels_size);
     if (target != GL_TEXTURE_2D || xoffset != 0 || yoffset != 0 || pixels == NULL ||
@@ -805,8 +894,7 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, G
         return;
     }
 
-    if (try_astc_upload("glTexSubImage2D", target, level, width, height, 0, format, type, pixels,
-                        pixels_size, row_bytes, row_stride))
+    if (try_astc_upload("glTexSubImage2D", target, level, width, height, 0, format, type, pixels))
         return;
 
     fallback_uploads++;
