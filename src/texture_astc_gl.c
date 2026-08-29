@@ -52,6 +52,7 @@ struct astc_entry {
     int width;
     int height;
     unsigned int internal_format;
+    unsigned int upload_format;
     int gl4es_unsafe;
     char path[PATH_MAX];
 };
@@ -293,12 +294,15 @@ static void load_manifest(void) {
         char *format_text = strtok(NULL, "\t\r\n");
         char *path_text = strtok(NULL, "\t\r\n");
         char *kind_text = strtok(NULL, "\t\r\n");
+        char *relative_path_text = strtok(NULL, "\t\r\n");
+        char *layout_text = strtok(NULL, "\t\r\n");
         struct astc_entry entry;
         unsigned int width;
         unsigned int height;
 
         if (hash_text == NULL || width_text == NULL || height_text == NULL || format_text == NULL ||
-            path_text == NULL) {
+            path_text == NULL || kind_text == NULL || relative_path_text == NULL ||
+            layout_text == NULL) {
             continue;
         }
 
@@ -311,9 +315,16 @@ static void load_manifest(void) {
 
         entry.width = (int)width;
         entry.height = (int)height;
-        entry.gl4es_unsafe = kind_text != NULL &&
-                             (strcmp(kind_text, "font") == 0 ||
-                              strcmp(kind_text, "detail") == 0);
+        if (strcmp(layout_text, "rgba") == 0)
+            entry.upload_format = GL_RGBA;
+        else if (strcmp(layout_text, "bgra") == 0)
+            entry.upload_format = GL_BGRA;
+        else if (strcmp(layout_text, "rgb") == 0)
+            entry.upload_format = GL_RGB;
+        else
+            continue;
+        entry.gl4es_unsafe =
+            strcmp(kind_text, "font") == 0 || strcmp(kind_text, "detail") == 0;
         if (snprintf(entry.path, sizeof(entry.path), "%s/%s", cache_dir, path_text) >=
             (int)sizeof(entry.path)) {
             continue;
@@ -480,16 +491,31 @@ static void log_large_allocation(const char *api, GLsizei width, GLsizei height,
             has_candidate_dimension(width, height) ? "yes" : "no");
 }
 
-static const struct astc_entry *find_entry(uint64_t hash, int width, int height) {
+static const struct astc_entry *find_entry(uint64_t hash, int width, int height,
+                                           GLenum upload_format, int *gl4es_unsafe) {
+    const struct astc_entry *selected = NULL;
+
     if (!initialized)
         load_manifest();
 
     for (size_t i = 0; i < entry_count; i++) {
-        if (entries[i].hash == hash && entries[i].width == width && entries[i].height == height)
-            return &entries[i];
+        const struct astc_entry *entry = &entries[i];
+
+        if (entry->hash != hash || entry->width != width || entry->height != height ||
+            entry->upload_format != upload_format) {
+            continue;
+        }
+
+        *gl4es_unsafe |= entry->gl4es_unsafe;
+        if (selected == NULL) {
+            selected = entry;
+        } else if (entry->internal_format != selected->internal_format ||
+                   strcmp(entry->path, selected->path) != 0) {
+            return NULL;
+        }
     }
 
-    return NULL;
+    return selected;
 }
 
 static unsigned char *read_file(const char *path, size_t *out_size) {
@@ -576,6 +602,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
                            const void *pixels, size_t pixels_size) {
     uint64_t hash;
     const struct astc_entry *entry;
+    int gl4es_unsafe = 0;
 
     if (!can_try_astc() || !has_candidate_dimension(width, height))
         return 0;
@@ -583,7 +610,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
     log_startup_once();
     candidate_uploads++;
     hash = fnv1a64((const unsigned char *)pixels, pixels_size);
-    entry = find_entry(hash, width, height);
+    entry = find_entry(hash, width, height, format, &gl4es_unsafe);
     if (entry == NULL) {
         if (env_enabled("SWAPPER_ASTC_DEBUG") &&
             (candidate_miss_debug_count < 32 || pixels_size >= 1024 * 1024)) {
@@ -600,7 +627,7 @@ static int try_astc_upload(const char *api, GLenum target, GLint level, GLsizei 
     const char *gl_driver = getenv("SDL_VIDEO_GL_DRIVER");
     /* gl4es accepts alpha-heavy font and detail ASTC uploads but samples transparent texels as
      * opaque on the Mali blob. */
-    if (entry->gl4es_unsafe && gl_driver != NULL && strstr(gl_driver, "gl4es") != NULL)
+    if (gl4es_unsafe && gl_driver != NULL && strstr(gl_driver, "gl4es") != NULL)
         return 0;
 
     matched_uploads++;

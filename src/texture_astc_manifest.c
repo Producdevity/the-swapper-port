@@ -539,6 +539,11 @@ static int is_detail_texture(const char *relative_path) {
     return has_suffix(relative_path, ".tga");
 }
 
+static int is_font_texture(const char *relative_path) {
+    return strstr(relative_path, "fonts/") == relative_path ||
+           strstr(relative_path, "/fonts/") != NULL;
+}
+
 static enum texture_kind texture_kind_for_path(const char *relative_path,
                                                const struct image *image) {
     uint64_t pixels = (uint64_t)image->width * image->height;
@@ -546,8 +551,7 @@ static enum texture_kind texture_kind_for_path(const char *relative_path,
     if (strstr(relative_path, "#normal") != NULL)
         return pixels >= 16384 ? TEXTURE_NORMAL : TEXTURE_SKIP;
 
-    if (strstr(relative_path, "fonts/") == relative_path ||
-        strstr(relative_path, "/fonts/") != NULL)
+    if (is_font_texture(relative_path))
         return pixels >= 262144 ? TEXTURE_FONT : TEXTURE_SKIP;
     if (pixels < 65536)
         return TEXTURE_SKIP;
@@ -558,8 +562,10 @@ static enum texture_kind texture_kind_for_path(const char *relative_path,
 static enum texture_kind texture_kind_for_mips_path(const char *relative_path) {
     if (strstr(relative_path, "#normal") != NULL)
         return TEXTURE_NORMAL;
+    if (is_font_texture(relative_path))
+        return TEXTURE_FONT;
 
-    return is_detail_texture(relative_path) ? TEXTURE_DETAIL : TEXTURE_COLOR;
+    return TEXTURE_COLOR;
 }
 
 static int mkdir_p_for_file(const char *path) {
