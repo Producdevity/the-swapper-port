@@ -5,10 +5,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/deploy-rocknix.sh [options] <ssh-host>
+Usage: scripts/deploy-amberelec.sh [options] <ssh-host>
 
 Options:
-  --root <path>             ROCKNIX storage root. Default: /storage
+  --root <path>             AmberELEC storage root. Default: /storage
   --ports-dir <path>        Full ports directory. Default: <root>/roms/ports
   --autoinstall             Copy theswapper.zip to PortMaster autoinstall.
   --autoinstall-dir <path>  Autoinstall directory. Default: <ports-dir>/PortMaster/autoinstall
@@ -18,9 +18,9 @@ Options:
 
 Environment:
   SWAPPER_DEPLOY_HOST
-  SWAPPER_ROCKNIX_ROOT
-  SWAPPER_ROCKNIX_PORTS_DIR
-  SWAPPER_ROCKNIX_AUTOINSTALL_DIR
+  SWAPPER_AMBERELEC_ROOT
+  SWAPPER_AMBERELEC_PORTS_DIR
+  SWAPPER_AMBERELEC_AUTOINSTALL_DIR
   SWAPPER_GAMEFILES_DIR
   SWAPPER_RESET_SETUP=1
   SWAPPER_RESET_PROFILES=1
@@ -28,10 +28,35 @@ Environment:
 EOF
 }
 
+quote_remote_arg() {
+  local escaped
+
+  escaped="$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+  printf "'%s'" "$escaped"
+}
+
+run_remote_sh() {
+  local remote_host="$1"
+  local remote_command="sh -s --"
+  local arg
+
+  shift
+  for arg in "$@"; do
+    remote_command+=" $(quote_remote_arg "$arg")"
+  done
+
+  # shellcheck disable=SC2029
+  ssh "$remote_host" "$remote_command"
+}
+
+remote_target() {
+  printf '%s:%s' "$1" "$(quote_remote_arg "$2")"
+}
+
 host="${SWAPPER_DEPLOY_HOST:-}"
-root="${SWAPPER_ROCKNIX_ROOT:-/storage}"
-ports_dir="${SWAPPER_ROCKNIX_PORTS_DIR:-}"
-autoinstall_dir="${SWAPPER_ROCKNIX_AUTOINSTALL_DIR:-}"
+root="${SWAPPER_AMBERELEC_ROOT:-/storage}"
+ports_dir="${SWAPPER_AMBERELEC_PORTS_DIR:-}"
+autoinstall_dir="${SWAPPER_AMBERELEC_AUTOINSTALL_DIR:-}"
 gamefiles_dir="${SWAPPER_GAMEFILES_DIR:-}"
 reset_setup="${SWAPPER_RESET_SETUP:-0}"
 reset_profiles="${SWAPPER_RESET_PROFILES:-0}"
@@ -107,16 +132,38 @@ fi
 
 if [ "$autoinstall" = "1" ]; then
   make zip
-  ssh "$host" 'sh -s' -- "$autoinstall_dir" <<'REMOTE_AUTOINSTALL_MKDIR'
+  staging_path="$(run_remote_sh "$host" "$autoinstall_dir" <<'REMOTE_AUTOINSTALL_STAGE'
 set -e
 mkdir -p "$1"
-REMOTE_AUTOINSTALL_MKDIR
-  scp "build/theswapper.zip" "$host:/tmp/theswapper.zip.tmp"
-  ssh "$host" 'sh -s' -- "$autoinstall_dir" <<'REMOTE_AUTOINSTALL'
+mktemp "$1/.theswapper.zip.XXXXXX"
+REMOTE_AUTOINSTALL_STAGE
+)"
+  case "$staging_path" in
+    "$autoinstall_dir"/.theswapper.zip.*) ;;
+    *)
+      echo "Unexpected remote staging path: $staging_path" >&2
+      exit 1
+      ;;
+  esac
+  if ! rsync -rt --no-owner --no-group --omit-dir-times \
+    "build/theswapper.zip" "$(remote_target "$host" "$staging_path")"; then
+    run_remote_sh "$host" "$staging_path" <<'REMOTE_AUTOINSTALL_CLEANUP' || true
+rm -f "$1"
+REMOTE_AUTOINSTALL_CLEANUP
+    exit 1
+  fi
+  run_remote_sh "$host" "$staging_path" "$autoinstall_dir/theswapper.zip" <<'REMOTE_AUTOINSTALL'
 set -e
-autoinstall_dir="$1"
-mv /tmp/theswapper.zip.tmp "$autoinstall_dir/theswapper.zip"
-ls -l "$autoinstall_dir/theswapper.zip"
+staging_path="$1"
+destination_path="$2"
+cleanup() {
+  [ -z "$staging_path" ] || rm -f "$staging_path"
+}
+trap cleanup 0 1 2 15
+chmod 644 "$staging_path"
+mv "$staging_path" "$destination_path"
+staging_path=
+ls -l "$destination_path"
 REMOTE_AUTOINSTALL
   echo "Open PortMaster on the device to process the autoinstall zip."
   exit 0
@@ -145,7 +192,7 @@ gamedir="$ports_dir/theswapper"
 
 printf 'Deploying The Swapper to %s:%s\n' "$host" "$gamedir"
 
-ssh "$host" 'sh -s' -- "$ports_dir" "$gamedir" <<'REMOTE_MKDIR'
+run_remote_sh "$host" "$ports_dir" "$gamedir" <<'REMOTE_MKDIR'
 set -e
 ports_dir="$1"
 gamedir="$2"
@@ -161,21 +208,23 @@ rsync -rt --delete --no-owner --no-group --omit-dir-times \
   --exclude setup.log \
   --exclude log.txt \
   --exclude logs/ \
-  "$payload/" "$host:$gamedir/"
+  "$payload/" "$(remote_target "$host" "$gamedir/")"
 rsync -rt --no-owner --no-group --omit-dir-times \
   "$package_root/README.md" \
   "$package_root/cover.png" \
   "$package_root/gameinfo.xml" \
   "$package_root/port.json" \
   "$package_root/screenshot.png" \
-  "$host:$gamedir/"
-scp "$launcher" "$host:$ports_dir/The Swapper.sh.tmp"
+  "$(remote_target "$host" "$gamedir/")"
+rsync -rt --no-owner --no-group --omit-dir-times \
+  "$launcher" "$(remote_target "$host" "$ports_dir/The Swapper.sh.tmp")"
 
 if [ -n "$gamefiles_dir" ]; then
-  rsync -rt --no-owner --no-group --omit-dir-times "$gamefiles_dir/" "$host:$gamedir/gamedata/"
+  rsync -rt --no-owner --no-group --omit-dir-times \
+    "$gamefiles_dir/" "$(remote_target "$host" "$gamedir/gamedata/")"
 fi
 
-ssh "$host" 'sh -s' -- "$ports_dir" "$gamedir" "$reset_setup" "$reset_profiles" <<'REMOTE'
+run_remote_sh "$host" "$ports_dir" "$gamedir" "$reset_setup" "$reset_profiles" <<'REMOTE'
 set -e
 ports_dir="$1"
 gamedir="$2"

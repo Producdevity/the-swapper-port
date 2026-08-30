@@ -86,7 +86,6 @@ for required in \
   "$payload/libs.aarch64/libtexture_astc.so" \
   "$payload/tools/setup" \
   "$payload/tools/texture-astc-manifest" \
-  "$payload/tools/texture-downscale" \
   "$payload/tools/xdg-open"; do
   if [ ! -e "$required" ]; then
     echo "Missing package file: $required" >&2
@@ -176,7 +175,7 @@ mv "$portdir/The Swapper.sh.tmp" "$portdir/The Swapper.sh"
 mv /tmp/theswapper-cover.png.tmp "$catalog_dir/box/The Swapper.png"
 mv /tmp/theswapper-screenshot.png.tmp "$catalog_dir/preview/The Swapper.png"
 mv /tmp/theswapper-description.txt.tmp "$catalog_dir/text/The Swapper.txt"
-chmod 755 "$portdir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/texture-downscale" "$gamedir/tools/xdg-open"
+chmod 755 "$portdir/The Swapper.sh" "$gamedir/tools/setup" "$gamedir/tools/texture-astc-manifest" "$gamedir/tools/xdg-open"
 
 if [ "$reset_setup" = "1" ]; then
   rm -f \
@@ -199,7 +198,6 @@ ls -l "$portdir/The Swapper.sh" \
   "$gamedir/libs.aarch64/libtexture_astc.so" \
   "$gamedir/tools/setup" \
   "$gamedir/tools/texture-astc-manifest" \
-  "$gamedir/tools/texture-downscale" \
   "$gamedir/tools/xdg-open" \
   "$gamedir/libs.aarch64/libfmodex.so"
 

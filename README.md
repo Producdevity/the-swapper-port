@@ -23,8 +23,8 @@ directory.
 
 The game is a .NET Framework 4 assembly. The port runs it through PortMaster's
 Mono runtime and supplies native Linux replacements for the Windows-only native
-libraries used by the game. Some assets are downscaled and/or compressed to fit
-in memory.
+libraries used by the game. A runtime texture hook uses a compressed cache to
+reduce graphics memory use without modifying the game assets.
 
 ## Layout
 
@@ -77,6 +77,12 @@ Deploy to a ROCKNIX device:
 scripts/deploy-rocknix.sh <ssh-host>
 ```
 
+Deploy to an AmberELEC device:
+
+```bash
+scripts/deploy-amberelec.sh <ssh-host>
+```
+
 Deploy to an AArch64 dArkOS device:
 
 ```bash
@@ -90,6 +96,7 @@ autoinstall folder:
 scripts/deploy-muos.sh --autoinstall <ssh-host>
 scripts/deploy-knulli.sh --autoinstall <ssh-host>
 scripts/deploy-rocknix.sh --autoinstall <ssh-host>
+scripts/deploy-amberelec.sh --autoinstall <ssh-host>
 scripts/deploy-darkos.sh --autoinstall <ssh-host>
 ```
 
@@ -97,13 +104,15 @@ Then open PortMaster on the device. PortMaster will install the zip and update
 the frontend metadata.
 
 The deploy scripts use the standard single-card PortMaster paths by default.
-The Knulli, ROCKNIX, and dArkOS helpers also accept explicit directories for a two-SD-card setup:
+The Knulli, ROCKNIX, AmberELEC, and dArkOS helpers also accept explicit directories for a two-SD-card setup:
 
 ```bash
 scripts/deploy-knulli.sh --ports-dir /userdata/roms/ports <ssh-host>
 scripts/deploy-knulli.sh --autoinstall-dir /userdata/system/.local/share/PortMaster/autoinstall <ssh-host>
 scripts/deploy-rocknix.sh --ports-dir /storage/roms/ports <ssh-host>
 scripts/deploy-rocknix.sh --autoinstall-dir /storage/roms/ports/PortMaster/autoinstall <ssh-host>
+scripts/deploy-amberelec.sh --ports-dir /storage/roms/ports <ssh-host>
+scripts/deploy-amberelec.sh --autoinstall-dir /storage/roms/ports/PortMaster/autoinstall <ssh-host>
 scripts/deploy-darkos.sh --ports-dir /roms/ports <ssh-host>
 scripts/deploy-darkos.sh --autoinstall-dir /roms/tools/PortMaster/autoinstall <ssh-host>
 ```
@@ -119,13 +128,12 @@ scripts/deploy-muos.sh <ssh-host>
 ```
 
 Set `SWAPPER_RESET_SETUP=1` to force the first-launch setup step to run again on
-the next launch. Use in combination with `SWAPPER_GAMEFILES_DIR` to avoid issues
-where files already have been partially patched.
+the next launch and rebuild the compressed texture cache.
 
 ## First Launch
 
 The launcher uses PortMaster's patcher UI for first-run setup. The setup step
-validates the game files, installs the Mono DLL map, downscales selected texture
-assets in the user's local `gamedata` copy, seeds a low-spec profile if no
-profile exists yet, and marks setup complete. The seeded profile disables the
-improved graphics settings to reduce memory use on 1 GB devices.
+validates the game files, installs the Mono DLL map, builds the compressed
+texture cache, seeds a low-spec profile if no profile exists yet, and marks
+setup complete. The seeded profile disables the improved graphics settings to
+reduce memory use on 1 GB devices.
